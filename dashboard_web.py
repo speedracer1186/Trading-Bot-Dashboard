@@ -128,7 +128,7 @@ def _market_status() -> str:
 # ─────────────────────────────────────────────────────────────────
 mode_badge = "🟡 PAPER" if is_paper else "🔴 LIVE"
 st.markdown(
-    f"## 📈 Trading Bot v6.4.1 — Live Dashboard &nbsp;&nbsp; {mode_badge}"
+    f"## 📈 Trading Bot v6.5.0 — Live Dashboard &nbsp;&nbsp; {mode_badge}"
 )
 st.caption(
     f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ET  "
@@ -332,24 +332,47 @@ st.divider()
 st.subheader("Session Trade Log")
 
 @st.cache_data(ttl=60, show_spinner=False)
-def _fetch_github_csv(repo: str, token: str, filename: str):
-    """Fetch a CSV from a private GitHub repo via Contents API. Cached 60s."""
-    import base64, urllib.request, json as _json
-    url = f"https://api.github.com/repos/{repo}/contents/results/{filename}"
+def _fetch_github_csv(repo: str, filename: str, token: str = ""):
+    """
+    Fetch a session CSV from GitHub.
+    Tries raw URL first (works for public repos, no auth needed).
+    Falls back to Contents API with token (works for private repos).
+    """
+    import base64, urllib.request as _ur, json as _json
+    from io import StringIO
+
+    # Method 1: raw URL (public repo — no token needed)
+    raw_url = (f"https://raw.githubusercontent.com/"
+               f"{repo}/main/results/{filename}")
+    try:
+        req = _ur.Request(raw_url, headers={"User-Agent": "TradingBotDashboard/6.5"})
+        with _ur.urlopen(req, timeout=8) as r:
+            df = pd.read_csv(StringIO(r.read().decode("utf-8")))
+            return df if not df.empty else None
+    except _ur.HTTPError as e:
+        if e.code != 404:
+            pass  # fall through to method 2
+    except Exception:
+        pass
+
+    # Method 2: Contents API with token (private repo)
+    if not token:
+        return None
+    api_url = (f"https://api.github.com/repos/{repo}"
+               f"/contents/results/{filename}")
     headers = {
         "Authorization": f"token {token}",
         "Accept":        "application/vnd.github.v3+json",
-        "User-Agent":    "TradingBotDashboard/6.4.1",
+        "User-Agent":    "TradingBotDashboard/6.5",
     }
     try:
-        req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=8) as r:
+        req = _ur.Request(api_url, headers=headers)
+        with _ur.urlopen(req, timeout=8) as r:
             data = _json.loads(r.read())
-        from io import StringIO
-        raw = base64.b64decode(data["content"]).decode("utf-8")
-        df  = pd.read_csv(StringIO(raw))
+        raw  = base64.b64decode(data["content"]).decode("utf-8")
+        df   = pd.read_csv(StringIO(raw))
         return df if not df.empty else None
-    except urllib.error.HTTPError as e:
+    except _ur.HTTPError as e:
         if e.code == 404:
             return None
         raise
@@ -362,11 +385,11 @@ _gh_token   = st.secrets.get("GITHUB_TOKEN", "")
 _gh_repo    = st.secrets.get("GITHUB_REPO",  "")
 _log_loaded = False
 
-if _gh_token and _gh_repo:
+if _gh_repo:
     for _mode in ("paper", "live"):
         _fname = f"session_{_mode}_{_today_str}.csv"
         try:
-            _df_gh = _fetch_github_csv(_gh_repo, _gh_token, _fname)
+            _df_gh = _fetch_github_csv(_gh_repo, _fname, token=_gh_token)
             if _df_gh is not None:
                 st.dataframe(_df_gh, hide_index=True)
                 _log_loaded = True
@@ -379,15 +402,17 @@ if _gh_token and _gh_repo:
             st.caption(f"GitHub fetch error: {_ge}")
 
 if not _log_loaded:
-    if not _gh_token or not _gh_repo:
+    if not _gh_repo:
         st.info(
-            "Add `GITHUB_TOKEN` and `GITHUB_REPO` to your Streamlit secrets, "
-            "then run `push_results.bat` after each session."
+            "Add `GITHUB_REPO` to your Streamlit secrets "
+            "(e.g. `speedracer1186/Trading-Bot-Dashboard`), "
+            "then run `run_push_results.bat` after each trading session."
         )
     else:
         st.info(
-            f"No trade log for today ({_today_str}) found in GitHub yet. "
-            "Run `push_results.bat` or wait for the bot to auto-push at session end."
+            f"No trade log pushed yet for today ({_today_str}). "
+            "Run `run_push_results.bat` after the trading session ends "
+            "and it will appear here automatically."
         )
 
 
@@ -434,7 +459,7 @@ except Exception as e:
 st.divider()
 col_a, col_b = st.columns([4, 1])
 col_a.caption(
-    "Trading Bot v6.4.1 · Alpaca paper trading · "
+    "Trading Bot v6.5.0 · Alpaca paper trading · "
     "Data refreshes every 30 seconds · "
     "For monitoring only — no orders placed from this dashboard."
 )
