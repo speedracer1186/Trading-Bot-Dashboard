@@ -138,6 +138,11 @@ st.caption(
 # ─────────────────────────────────────────────────────────────────
 #  ACCOUNT SUMMARY
 # ─────────────────────────────────────────────────────────────────
+# Safe defaults — used by Risk Status section even if account call fails
+daily_pl   = 0.0
+DAILY_GOAL = 2_000.0
+DAILY_MAX  = 1_000.0
+
 try:
     account       = client.get_account()
     equity        = float(account.equity)
@@ -146,9 +151,6 @@ try:
     last_equity   = float(getattr(account, "last_equity", equity))
     daily_pl      = equity - last_equity
     daily_pl_pct  = (daily_pl / last_equity * 100) if last_equity > 0 else 0.0
-
-    DAILY_GOAL = 2_000.0
-    DAILY_MAX  = 1_000.0
 
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Equity",        f"${equity:,.2f}")
