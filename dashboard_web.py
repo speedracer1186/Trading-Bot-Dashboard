@@ -227,10 +227,10 @@ with left:
 
             styled = (
                 df_pos.style
-                .applymap(_color_pnl, subset=["P&L $", "P&L %"])
+                .map(_color_pnl, subset=["P&L $", "P&L %"])
                 .format({"P&L $": "{:+.2f}", "P&L %": "{:+.2f}%"})
             )
-            st.dataframe(styled, use_container_width=True, hide_index=True)
+            st.dataframe(styled, hide_index=True)
             st.caption(
                 f"Total deployed: **${total_cost:,.0f}**"
                 f" ({total_cost/equity*100:.1f}% of equity)  ·  "
@@ -314,8 +314,8 @@ try:
             df_ord = pd.DataFrame(rows)
             def _color_side(val):
                 return "color: #4ade80" if val == "BUY" else "color: #f87171"
-            styled_ord = df_ord.style.applymap(_color_side, subset=["Side"])
-            st.dataframe(styled_ord, use_container_width=True, hide_index=True)
+            styled_ord = df_ord.style.map(_color_side, subset=["Side"])
+            st.dataframe(styled_ord, hide_index=True)
             st.caption(f"{len(rows)} fills today")
         else:
             st.info("No filled orders today.")
@@ -368,7 +368,7 @@ if _gh_token and _gh_repo:
         try:
             _df_gh = _fetch_github_csv(_gh_repo, _gh_token, _fname)
             if _df_gh is not None:
-                st.dataframe(_df_gh, use_container_width=True, hide_index=True)
+                st.dataframe(_df_gh, hide_index=True)
                 _log_loaded = True
                 st.caption(
                     f"Source: GitHub `{_gh_repo}/results/{_fname}` "
@@ -414,8 +414,7 @@ try:
         df_eq   = df_eq[df_eq["Equity"] > 0]
         if not df_eq.empty:
             st.line_chart(
-                df_eq.set_index("Time")["Equity"],
-                use_container_width=True,
+                df_eq.set_index("Time")["Equity"]
             )
             start_val = df_eq["Equity"].iloc[0]
             end_val   = df_eq["Equity"].iloc[-1]
@@ -442,6 +441,9 @@ col_a.caption(
 if col_b.button("🔄 Refresh now"):
     st.rerun()
 
-# Auto-refresh every 30 seconds
+# Auto-refresh every 30 seconds using session state counter
+if "refresh_count" not in st.session_state:
+    st.session_state.refresh_count = 0
 time.sleep(30)
+st.session_state.refresh_count += 1
 st.rerun()
