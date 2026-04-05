@@ -1,5 +1,5 @@
 """
-push_results.py — Auto-push today's session trade log to GitHub (v6.4.1)
+push_results.py — Auto-push today's session trade log to GitHub (v6.7.0)
 =========================================================================
 Finds today's session_paper_YYYYMMDD.csv (or session_live_*.csv) in the
 results/ folder, stages it in git, commits, and pushes to the private

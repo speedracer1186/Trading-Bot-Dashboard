@@ -128,7 +128,7 @@ def _market_status() -> str:
 # ─────────────────────────────────────────────────────────────────
 mode_badge = "🟡 PAPER" if is_paper else "🔴 LIVE"
 st.markdown(
-    f"## 📈 Trading Bot v6.5.0 — Live Dashboard &nbsp;&nbsp; {mode_badge}"
+    f"## 📈 Trading Bot v6.7.0 — Live Dashboard &nbsp;&nbsp; {mode_badge}"
 )
 st.caption(
     f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ET  "
@@ -459,7 +459,7 @@ except Exception as e:
 st.divider()
 col_a, col_b = st.columns([4, 1])
 col_a.caption(
-    "Trading Bot v6.5.0 · Alpaca paper trading · "
+    "Trading Bot v6.7.0 · Alpaca paper trading · "
     "Data refreshes every 30 seconds · "
     "For monitoring only — no orders placed from this dashboard."
 )
