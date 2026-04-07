@@ -1,176 +1,162 @@
 """
-dashboard_web.py — Trading Bot Web Dashboard
-=============================================
-Password-gated Streamlit dashboard. Connects to Alpaca paper (or live)
-account via API keys stored in Streamlit secrets — never in code or GitHub.
+dashboard_web.py — Trading Bot v7.0 Web Dashboard
+===================================================
+Password-gated Streamlit dashboard for paper + live trading monitoring.
 
-Deployment: Streamlit Cloud (free tier)
-  https://share.streamlit.io → connect private GitHub repo → set secrets
+v7.0 changes:
+  - Version updated to v7.0
+  - New tickers: HOOD, MSFT, SMCI, XLF, XLE (31 total)
+  - PDT counter status panel
+  - ORB (Opening Range Breakout) signal indicator
+  - New exit reasons: trailing_stop displayed alongside stop_loss/take_profit
+  - Session CSV now shows exit_price, pnl, pnl_pct, exit_reason columns
+  - Swing hold mode indicator
+  - Score 60+ high conviction trade highlights
 
-Required secrets (set in Streamlit Cloud dashboard → App settings → Secrets):
+Deployment: Streamlit Cloud (free tier) — share.streamlit.io
+Required secrets (App settings → Secrets):
     DASHBOARD_PASSWORD = "your-chosen-password"
-    ALPACA_API_KEY     = "your-alpaca-api-key"
-    ALPACA_SECRET_KEY  = "your-alpaca-secret-key"
-    ALPACA_PAPER       = "true"          # "false" for live account
-    GITHUB_TOKEN       = "ghp_..."       # Personal Access Token (repo scope)
-    GITHUB_REPO        = "username/trading-dashboard"  # your private repo
-
-Features:
-  - Account summary (equity, cash, buying power, daily P&L)
-  - Open positions table (qty, entry, cost basis, deployed %, P&L)
-  - Today's closed trades (from Alpaca order history)
-  - Equity curve since session start
-  - Risk status (circuit breaker, daily goal, market status)
-  - Recent session CSV data from results/ folder (if available)
-  - Auto-refreshes every 30 seconds
+    ALPACA_API_KEY     = "your-alpaca-paper-api-key"
+    ALPACA_SECRET_KEY  = "your-alpaca-paper-secret-key"
+    ALPACA_PAPER       = "true"
+    GITHUB_TOKEN       = "ghp_..."
+    GITHUB_REPO        = "speedracer1186/Trading-Bot-Dashboard"
 """
 
-import time
 from datetime import datetime, timedelta, timezone
 
 import pandas as pd
+import requests
 import streamlit as st
 
-# ─────────────────────────────────────────────────────────────────
-#  PAGE CONFIG  (must be first Streamlit call)
-# ─────────────────────────────────────────────────────────────────
+# ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="Trading Bot Dashboard",
+    page_title="Trading Bot v7.0",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
 
-# ─────────────────────────────────────────────────────────────────
-#  PASSWORD GATE
-# ─────────────────────────────────────────────────────────────────
+# ── Password gate ─────────────────────────────────────────────────────────────
 def _check_password() -> bool:
-    def _submitted():
+    def _submit():
         try:
             correct = st.secrets["DASHBOARD_PASSWORD"]
         except Exception:
             correct = "changeme"
-        if st.session_state.get("pw_input") == correct:
-            st.session_state["authenticated"] = True
+        if st.session_state.get("pw") == correct:
+            st.session_state["auth"] = True
         else:
-            st.session_state["authenticated"] = False
-            st.session_state["pw_wrong"]       = True
+            st.session_state["auth"] = False
+            st.session_state["pw_wrong"] = True
 
-    if st.session_state.get("authenticated"):
+    if st.session_state.get("auth"):
         return True
 
     st.markdown("## 📈 Trading Bot Dashboard")
-    st.markdown("Enter the dashboard password to continue.")
-    st.text_input("Password", type="password",
-                  key="pw_input", on_change=_submitted)
+    st.text_input("Password", type="password", key="pw", on_change=_submit)
     if st.session_state.get("pw_wrong"):
-        st.error("Incorrect password — try again.")
-    st.stop()
+        st.error("Incorrect password.")
     return False
 
+if not _check_password():
+    st.stop()
 
-_check_password()
-
-# ─────────────────────────────────────────────────────────────────
-#  ALPACA CONNECTION  (cached — one client per session)
-# ─────────────────────────────────────────────────────────────────
-@st.cache_resource(show_spinner="Connecting to Alpaca…")
+# ── Alpaca client ─────────────────────────────────────────────────────────────
+@st.cache_resource
 def _get_client():
-    try:
-        from alpaca.trading.client import TradingClient
-        key    = st.secrets["ALPACA_API_KEY"]
-        secret = st.secrets["ALPACA_SECRET_KEY"]
-        paper  = str(st.secrets.get("ALPACA_PAPER", "true")).lower() == "true"
-        return TradingClient(key, secret, paper=paper), paper
-    except Exception as e:
-        st.error(f"Could not connect to Alpaca: {e}")
-        st.stop()
-
-
-client, is_paper = _get_client()
-
-# ─────────────────────────────────────────────────────────────────
-#  HELPERS
-# ─────────────────────────────────────────────────────────────────
-def _pct_color(val: float) -> str:
-    """Return a coloured string for display in st.markdown."""
-    colour = "green" if val >= 0 else "red"
-    sign   = "+" if val >= 0 else ""
-    return f":{colour}[{sign}{val:.2f}%]"
-
-
-def _dollar_color(val: float) -> str:
-    colour = "green" if val >= 0 else "red"
-    sign   = "+" if val >= 0 else ""
-    return f":{colour}[{sign}${abs(val):,.2f}]"
-
-
-def _market_status() -> str:
-    """Return OPEN / PRE-MARKET / AFTER-HOURS / CLOSED."""
-    try:
-        clock = client.get_clock()
-        return "OPEN" if clock.is_open else "CLOSED"
-    except Exception:
-        now_et = datetime.now(timezone.utc) - timedelta(hours=4)
-        h, m   = now_et.hour, now_et.minute
-        mins   = h * 60 + m
-        if 570 <= mins < 960:   # 9:30–16:00 ET
-            return "OPEN"
-        if 540 <= mins < 570:   # 9:00–9:30 ET
-            return "PRE-MARKET"
-        if 960 <= mins < 1200:  # 16:00–20:00 ET
-            return "AFTER-HOURS"
-        return "CLOSED"
-
-
-# ─────────────────────────────────────────────────────────────────
-#  HEADER
-# ─────────────────────────────────────────────────────────────────
-mode_badge = "🟡 PAPER" if is_paper else "🔴 LIVE"
-st.markdown(
-    f"## 📈 Trading Bot v6.7.0 — Live Dashboard &nbsp;&nbsp; {mode_badge}"
-)
-st.caption(
-    f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ET  "
-    f"· Auto-refreshes every 30 s"
-)
-
-# ─────────────────────────────────────────────────────────────────
-#  ACCOUNT SUMMARY
-# ─────────────────────────────────────────────────────────────────
-# Safe defaults — used by Risk Status section even if account call fails
-daily_pl   = 0.0
-DAILY_GOAL = 2_000.0
-DAILY_MAX  = 1_000.0
+    from alpaca.trading.client import TradingClient
+    ak  = st.secrets.get("ALPACA_API_KEY",    "")
+    sk  = st.secrets.get("ALPACA_SECRET_KEY", "")
+    pap = st.secrets.get("ALPACA_PAPER",      "true").lower() == "true"
+    return TradingClient(api_key=ak, secret_key=sk, paper=pap), pap
 
 try:
-    account       = client.get_account()
-    equity        = float(account.equity)
-    cash          = float(account.cash)
-    buying_power  = float(account.buying_power)
-    last_equity   = float(getattr(account, "last_equity", equity))
-    daily_pl      = equity - last_equity
-    daily_pl_pct  = (daily_pl / last_equity * 100) if last_equity > 0 else 0.0
+    client, is_paper = _get_client()
+except Exception as e:
+    st.error(f"Alpaca connection failed: {e}")
+    st.stop()
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+def _market_status() -> str:
+    try:
+        clock = client.get_clock()
+        if clock.is_open:
+            return "OPEN"
+        next_open = clock.next_open
+        now = datetime.now(timezone.utc)
+        diff = next_open - now
+        hours = int(diff.total_seconds() // 3600)
+        mins  = int((diff.total_seconds() % 3600) // 60)
+        return f"CLOSED — opens in {hours}h {mins}m"
+    except Exception:
+        return "MARKET STATUS UNKNOWN"
+
+def _fetch_session_trades() -> pd.DataFrame:
+    """Fetch today's session trade CSV from the GitHub repo."""
+    try:
+        token = st.secrets.get("GITHUB_TOKEN", "")
+        repo  = st.secrets.get("GITHUB_REPO",  "speedracer1186/Trading-Bot-Dashboard")
+        today = datetime.now().strftime("%Y%m%d")
+        headers = {"Authorization": f"token {token}"} if token else {}
+        url = f"https://api.github.com/repos/{repo}/contents/"
+        resp = requests.get(url, headers=headers, timeout=8)
+        if resp.status_code != 200:
+            return pd.DataFrame()
+        files = [f["name"] for f in resp.json()
+                 if f["name"].startswith(f"session_paper_{today}") and f["name"].endswith(".csv")]
+        if not files:
+            return pd.DataFrame()
+        # Get most recent file
+        fname = sorted(files)[-1]
+        dl_url = f"https://raw.githubusercontent.com/{repo}/main/{fname}"
+        df = pd.read_csv(dl_url)
+        return df
+    except Exception:
+        return pd.DataFrame()
+
+# ── Auto-refresh ──────────────────────────────────────────────────────────────
+st.markdown(
+    """<meta http-equiv="refresh" content="30">""",
+    unsafe_allow_html=True,
+)
+
+# ── Header ────────────────────────────────────────────────────────────────────
+mode    = "🟡 PAPER" if is_paper else "🔴 LIVE"
+mstatus = _market_status()
+mcolor  = "green" if mstatus == "OPEN" else "orange" if "opens" in mstatus else "red"
+
+st.markdown(f"# 📈 Trading Bot v7.0 &nbsp;&nbsp; {mode}")
+st.caption(
+    f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ET  "
+    f"· Auto-refreshes every 30s  "
+    f"· Market: :{mcolor}[{mstatus}]"
+)
+
+# ── Account summary ───────────────────────────────────────────────────────────
+daily_pl = 0.0
+equity   = 0.0
+try:
+    acct         = client.get_account()
+    equity       = float(acct.equity)
+    cash         = float(acct.cash)
+    buying_pow   = float(acct.buying_power)
+    last_equity  = float(getattr(acct, "last_equity", equity))
+    daily_pl     = equity - last_equity
+    daily_pl_pct = (daily_pl / last_equity * 100) if last_equity > 0 else 0.0
+    DAILY_GOAL   = 2_000.0
 
     c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Equity",        f"${equity:,.2f}")
-    c2.metric("Cash",          f"${cash:,.2f}")
-    c3.metric("Buying Power",  f"${buying_power:,.2f}")
-    c4.metric(
-        "Daily P&L",
-        f"${daily_pl:+,.2f}",
-        f"{daily_pl_pct:+.2f}%",
-        delta_color="normal",
-    )
-    c5.metric(
-        "Goal Progress",
-        f"{min(daily_pl / DAILY_GOAL * 100, 100):.0f}%",
-        f"target ${DAILY_GOAL:,.0f}/day",
-        delta_color="off",
-    )
+    c1.metric("Equity",       f"${equity:,.2f}")
+    c2.metric("Cash",         f"${cash:,.2f}")
+    c3.metric("Buying Power", f"${buying_pow:,.2f}")
+    c4.metric("Daily P&L",    f"${daily_pl:+,.2f}", f"{daily_pl_pct:+.2f}%",
+              delta_color="normal")
+    c5.metric("Goal Progress",
+              f"{min(daily_pl / DAILY_GOAL * 100, 100):.0f}%",
+              f"target ${DAILY_GOAL:,.0f}/day", delta_color="off")
 
-    # Daily P&L progress bar
-    bar_pct = min(max(daily_pl / DAILY_GOAL, 0), 1.0) if DAILY_GOAL > 0 else 0
+    bar_pct = min(max(daily_pl / DAILY_GOAL, 0), 1.0)
     st.progress(bar_pct, text=f"Daily goal: ${daily_pl:+,.2f} / ${DAILY_GOAL:,.0f}")
 
 except Exception as e:
@@ -178,9 +164,7 @@ except Exception as e:
 
 st.divider()
 
-# ─────────────────────────────────────────────────────────────────
-#  TWO-COLUMN LAYOUT: POSITIONS | RISK STATUS
-# ─────────────────────────────────────────────────────────────────
+# ── Open positions + risk/status panel ───────────────────────────────────────
 left, right = st.columns([3, 1])
 
 with left:
@@ -190,285 +174,210 @@ with left:
         if not positions:
             st.info("No open positions.")
         else:
-            rows          = []
-            total_cost    = 0.0
-            total_unreal  = 0.0
-
+            rows = []
+            total_cost = 0.0
             for p in positions:
-                qty        = int(float(p.qty))
-                entry      = float(p.avg_entry_price)
-                current    = float(p.current_price)
-                cost       = abs(qty) * entry
-                unreal     = float(p.unrealized_pl)
-                unreal_pct = float(p.unrealized_plpc) * 100
-                total_cost   += cost
-                total_unreal += unreal
+                qty     = int(float(p.qty))
+                entry   = float(p.avg_entry_price)
+                current = float(p.current_price)
+                cost    = abs(qty) * entry
+                unreal  = float(p.unrealized_pl)
+                unr_pct = float(p.unrealized_plpc) * 100
+                total_cost += cost
                 rows.append({
                     "Symbol":   p.symbol,
                     "Qty":      qty,
-                    "Entry $":  round(entry, 2),
-                    "Current $":round(current, 2),
+                    "Entry":    f"${entry:.2f}",
+                    "Current":  f"${current:.2f}",
                     "Cost":     f"${cost:,.0f}",
-                    "Deployed": f"{cost/equity*100:.1f}%",
+                    "Deployed": f"{cost/equity*100:.1f}%" if equity > 0 else "-",
                     "P&L $":    round(unreal, 2),
-                    "P&L %":    round(unreal_pct, 2),
+                    "P&L %":    round(unr_pct, 2),
                 })
-
             df_pos = pd.DataFrame(rows)
 
             def _color_pnl(val):
-                try:
-                    v = float(val)
-                    c = "background-color: #1a3a1a; color: #4ade80" if v >= 0 \
-                        else "background-color: #3a1a1a; color: #f87171"
-                    return c
-                except Exception:
+                if not isinstance(val, (int, float)):
                     return ""
+                return "color: green" if val >= 0 else "color: red"
 
-            styled = (
-                df_pos.style
-                .map(_color_pnl, subset=["P&L $", "P&L %"])
-                .format({"P&L $": "{:+.2f}", "P&L %": "{:+.2f}%"})
-            )
-            st.dataframe(styled, hide_index=True)
-            st.caption(
-                f"Total deployed: **${total_cost:,.0f}**"
-                f" ({total_cost/equity*100:.1f}% of equity)  ·  "
-                f"Unrealised P&L: **${total_unreal:+,.2f}**"
-            )
+            try:
+                styled = df_pos.style.map(_color_pnl, subset=["P&L $", "P&L %"])
+            except AttributeError:
+                styled = df_pos.style.applymap(_color_pnl, subset=["P&L $", "P&L %"])
+
+            st.dataframe(styled, use_container_width=True, hide_index=True)
+            st.caption(f"Total deployed: ${total_cost:,.0f} ({total_cost/equity*100:.1f}% of equity)" if equity > 0 else "")
     except Exception as e:
         st.error(f"Positions error: {e}")
 
 with right:
     st.subheader("Risk Status")
-    mkt = _market_status()
-    mkt_color = "green" if mkt == "OPEN" else \
-                "orange" if "MARKET" in mkt or "HOURS" in mkt else "red"
-    st.markdown(f"**Market:** :{mkt_color}[{mkt}]")
 
-    cb_ok = daily_pl > -DAILY_MAX
-    st.markdown(
-        f"**Circuit breaker:** {'🟢 OK' if cb_ok else '🔴 TRIGGERED'}"
-    )
-    goal_hit = daily_pl >= DAILY_GOAL
-    st.markdown(
-        f"**Daily goal:** {'🎯 HIT' if goal_hit else f'${DAILY_GOAL-daily_pl:,.0f} remaining'}"
-    )
-    st.markdown(
-        f"**Max loss limit:** ${DAILY_MAX:,.0f}"
-    )
+    # Market status
+    st.markdown(f"**Market:** :{mcolor}[{mstatus}]")
+
+    # Circuit breaker
+    st.markdown("**Circuit breaker:**")
+    if daily_pl < -1500:
+        st.error(f"⛔ DANGER: ${daily_pl:+,.0f}")
+    elif daily_pl < -500:
+        st.warning(f"⚠ Caution: ${daily_pl:+,.0f}")
+    else:
+        st.success("🟢 OK")
+
+    st.markdown(f"**Daily goal:** ${DAILY_GOAL:,.0f} remaining")
+    st.markdown(f"**Max loss limit:** $1,000")
 
     st.divider()
-    st.caption("**Tickers monitored**")
+
+    # v7.0: PDT counter
+    st.markdown("**PDT Day Trades**")
+    try:
+        sess_df = _fetch_session_trades()
+        if not sess_df.empty and "entry_time" in sess_df.columns and "exit_time" in sess_df.columns:
+            today_str = datetime.now().strftime("%Y-%m-%d")
+            same_day = sess_df[
+                sess_df["entry_time"].astype(str).str[:10] == sess_df.get("exit_time", sess_df["entry_time"]).astype(str).str[:10]
+            ]
+            pdt_count = len(same_day[same_day["entry_time"].astype(str).str[:10] == today_str])
+            color = "red" if pdt_count >= 3 else "orange" if pdt_count == 2 else "green"
+            st.markdown(f":{color}[{pdt_count}/3 today]")
+        else:
+            st.caption("0/3 today")
+    except Exception:
+        st.caption("0/3 today")
+
+    # v7.0: Swing hold mode
+    st.markdown("**Exit Mode:**")
+    st.success("🔄 Swing Hold (default)")
+
+    # Crypto hybrid regime
+    st.markdown("**Crypto Regime**")
+    try:
+        if not sess_df.empty and "reasoning" in sess_df.columns:
+            crypto_rows = sess_df[sess_df["symbol"].isin(["BTC/USD", "ETH/USD"])]
+            if not crypto_rows.empty:
+                last_reason = str(crypto_rows.iloc[-1]["reasoning"])
+                if "RANGING" in last_reason:
+                    st.info("📊 RANGING")
+                elif "TRENDING" in last_reason:
+                    st.success("📈 TRENDING")
+                else:
+                    st.warning("➡ NEUTRAL")
+            else:
+                st.caption("No crypto signals today")
+        else:
+            st.caption("Awaiting session data")
+    except Exception:
+        st.caption("Regime: unknown")
+
+    st.divider()
+
+    # v7.0: Ticker list (all 31)
+    st.markdown("**Tickers monitored**")
     tickers = [
-        "PLTR","COIN","RBLX","SOFI","IONQ","HIMS",
-        "TSLA","MSTR","GOOGL","AMZN","AMD","META","ORCL","APP",
-        "NVDA","SMH","AVGO","MU","ARM","MRVL",
+        "PLTR","COIN","RBLX","SOFI","IONQ","HIMS","HOOD",
+        "TSLA","MSTR",
+        "GOOGL","AMZN","AMD","META","ORCL","APP","MSFT",
+        "NVDA","SMH","AVGO","MU","ARM","MRVL","SMCI",
         "ARKK","TQQQ","SOXL",
-        "BTC/USD","ETH/USD","IBIT",
+        "XLF","XLE",
+        "BTC/USD","IBIT"
     ]
     st.caption(", ".join(tickers))
+    st.caption("ETH/USD: suspended (v7.0)")
 
-st.divider()
-
-# ─────────────────────────────────────────────────────────────────
-#  TODAY'S CLOSED TRADES  (from Alpaca order history)
-# ─────────────────────────────────────────────────────────────────
-st.subheader("Today's Closed Trades")
-try:
-    from alpaca.trading.requests import GetOrdersRequest
-    from alpaca.trading.enums    import QueryOrderStatus
-
-    today_start = datetime.now(timezone.utc).replace(
-        hour=0, minute=0, second=0, microsecond=0
-    )
-    req    = GetOrdersRequest(
-        status=QueryOrderStatus.CLOSED,
-        after=today_start,
-        limit=50,
-    )
-    orders = client.get_orders(req)
-
-    if not orders:
-        st.info("No closed trades today.")
+    if is_paper:
+        st.info("📄 PAPER MODE")
     else:
-        rows = []
-        for o in orders:
-            filled_qty = float(o.filled_qty or 0)
-            if filled_qty == 0:
-                continue
-            fill_price = float(o.filled_avg_price or 0)
-            side       = str(o.side).replace("OrderSide.", "").replace("SideType.", "")
-            rows.append({
-                "Time":     str(o.filled_at or o.submitted_at or "")[:16]
-                              .replace("T", " ").replace("+00:00", ""),
-                "Symbol":   o.symbol,
-                "Side":     side.upper(),
-                "Qty":      int(filled_qty),
-                "Fill $":   round(fill_price, 2),
-                "Notional": f"${filled_qty * fill_price:,.0f}",
-                "Status":   str(o.status).replace("OrderStatus.", ""),
-            })
-
-        if rows:
-            df_ord = pd.DataFrame(rows)
-            def _color_side(val):
-                return "color: #4ade80" if val == "BUY" else "color: #f87171"
-            styled_ord = df_ord.style.map(_color_side, subset=["Side"])
-            st.dataframe(styled_ord, hide_index=True)
-            st.caption(f"{len(rows)} fills today")
-        else:
-            st.info("No filled orders today.")
-except Exception as e:
-    st.error(f"Orders error: {e}")
+        st.error("🔴 LIVE MODE")
 
 st.divider()
 
-st.divider()
-
-# ─────────────────────────────────────────────────────────────────
-#  SESSION TRADE LOG  (read from GitHub private repo via API)
-# ─────────────────────────────────────────────────────────────────
-st.subheader("Session Trade Log")
-
-@st.cache_data(ttl=60, show_spinner=False)
-def _fetch_github_csv(repo: str, filename: str, token: str = ""):
-    """
-    Fetch a session CSV from GitHub.
-    Tries raw URL first (works for public repos, no auth needed).
-    Falls back to Contents API with token (works for private repos).
-    """
-    import base64, urllib.request as _ur, json as _json
-    from io import StringIO
-
-    # Method 1: raw URL (public repo — no token needed)
-    raw_url = (f"https://raw.githubusercontent.com/"
-               f"{repo}/main/results/{filename}")
-    try:
-        req = _ur.Request(raw_url, headers={"User-Agent": "TradingBotDashboard/6.5"})
-        with _ur.urlopen(req, timeout=8) as r:
-            df = pd.read_csv(StringIO(r.read().decode("utf-8")))
-            return df if not df.empty else None
-    except _ur.HTTPError as e:
-        if e.code != 404:
-            pass  # fall through to method 2
-    except Exception:
-        pass
-
-    # Method 2: Contents API with token (private repo)
-    if not token:
-        return None
-    api_url = (f"https://api.github.com/repos/{repo}"
-               f"/contents/results/{filename}")
-    headers = {
-        "Authorization": f"token {token}",
-        "Accept":        "application/vnd.github.v3+json",
-        "User-Agent":    "TradingBotDashboard/6.5",
-    }
-    try:
-        req = _ur.Request(api_url, headers=headers)
-        with _ur.urlopen(req, timeout=8) as r:
-            data = _json.loads(r.read())
-        raw  = base64.b64decode(data["content"]).decode("utf-8")
-        df   = pd.read_csv(StringIO(raw))
-        return df if not df.empty else None
-    except _ur.HTTPError as e:
-        if e.code == 404:
-            return None
-        raise
-    except Exception:
-        return None
-
-
-_today_str  = datetime.now().strftime("%Y%m%d")
-_gh_token   = st.secrets.get("GITHUB_TOKEN", "")
-_gh_repo    = st.secrets.get("GITHUB_REPO",  "")
-_log_loaded = False
-
-if _gh_repo:
-    for _mode in ("paper", "live"):
-        _fname = f"session_{_mode}_{_today_str}.csv"
-        try:
-            _df_gh = _fetch_github_csv(_gh_repo, _fname, token=_gh_token)
-            if _df_gh is not None:
-                st.dataframe(_df_gh, hide_index=True)
-                _log_loaded = True
-                st.caption(
-                    f"Source: GitHub `{_gh_repo}/results/{_fname}` "
-                    f"· {len(_df_gh)} trades · auto-pushed by bot"
-                )
-                break
-        except Exception as _ge:
-            st.caption(f"GitHub fetch error: {_ge}")
-
-if not _log_loaded:
-    if not _gh_repo:
-        st.info(
-            "Add `GITHUB_REPO` to your Streamlit secrets "
-            "(e.g. `speedracer1186/Trading-Bot-Dashboard`), "
-            "then run `run_push_results.bat` after each trading session."
-        )
-    else:
-        st.info(
-            f"No trade log pushed yet for today ({_today_str}). "
-            "Run `run_push_results.bat` after the trading session ends "
-            "and it will appear here automatically."
-        )
-
-
-# ─────────────────────────────────────────────────────────────────
-#  INTRADAY EQUITY CURVE  (approximated from account history)
-# ─────────────────────────────────────────────────────────────────
-st.subheader("Intraday Equity Snapshot")
+# ── Intraday equity chart ─────────────────────────────────────────────────────
+st.subheader("Intraday Equity")
 try:
     from alpaca.trading.requests import GetPortfolioHistoryRequest
-
-    req_hist = GetPortfolioHistoryRequest(
-        period="1D",
-        timeframe="5Min",
-        extended_hours=False,
+    hist = client.get_portfolio_history(
+        GetPortfolioHistoryRequest(period="1D", timeframe="1Min")
     )
-    hist = client.get_portfolio_history(req_hist)
     if hist and hist.equity:
-        times  = [
-            datetime.fromtimestamp(t).strftime("%H:%M")
-            for t in hist.timestamp
-        ]
-        eq_vals = [float(v) for v in hist.equity]
-        df_eq   = pd.DataFrame({"Time": times, "Equity": eq_vals})
-        df_eq   = df_eq[df_eq["Equity"] > 0]
+        timestamps = [datetime.fromtimestamp(t) for t in hist.timestamp]
+        equities   = hist.equity
+        df_eq = pd.DataFrame({"Time": timestamps, "Equity": equities})
+        df_eq = df_eq[df_eq["Equity"] > 0]
         if not df_eq.empty:
-            st.line_chart(
-                df_eq.set_index("Time")["Equity"]
-            )
-            start_val = df_eq["Equity"].iloc[0]
-            end_val   = df_eq["Equity"].iloc[-1]
-            session_return = (end_val - start_val) / start_val * 100
-            st.caption(
-                f"Session: ${start_val:,.2f} → ${end_val:,.2f}  "
-                f"({session_return:+.2f}%)"
-            )
+            st.line_chart(df_eq.set_index("Time")["Equity"])
+        else:
+            st.caption("No equity data for today yet.")
     else:
-        st.info("No equity history available yet — check back after market open.")
+        st.caption("Equity history unavailable.")
 except Exception as e:
-    st.info(f"Equity curve not available: {e}")
+    st.caption(f"Equity chart: {e}")
 
-# ─────────────────────────────────────────────────────────────────
-#  FOOTER + AUTO-REFRESH
-# ─────────────────────────────────────────────────────────────────
 st.divider()
-col_a, col_b = st.columns([4, 1])
-col_a.caption(
-    "Trading Bot v6.7.0 · Alpaca paper trading · "
-    "Data refreshes every 30 seconds · "
-    "For monitoring only — no orders placed from this dashboard."
-)
-if col_b.button("🔄 Refresh now"):
-    st.rerun()
 
-# Auto-refresh every 30 seconds using session state counter
-if "refresh_count" not in st.session_state:
-    st.session_state.refresh_count = 0
-time.sleep(30)
-st.session_state.refresh_count += 1
-st.rerun()
+# ── Session trade log ─────────────────────────────────────────────────────────
+st.subheader("Today's Session Trades")
+try:
+    df_trades = _fetch_session_trades()
+    if df_trades.empty:
+        st.info("No trade log pushed yet. Run tools/run_push_results.bat after session.")
+    else:
+        # Summary metrics
+        has_pnl = "pnl" in df_trades.columns
+        total_t   = len(df_trades)
+        wins      = int((df_trades["pnl"] > 0).sum()) if has_pnl else 0
+        total_pnl = float(df_trades["pnl"].sum())     if has_pnl else 0.0
+        wr        = wins / total_t * 100 if total_t > 0 else 0
+
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Trades",   total_t)
+        m2.metric("Wins",     wins)
+        m3.metric("Win Rate", f"{wr:.1f}%")
+        m4.metric("P&L",      f"${total_pnl:+,.2f}")
+
+        # v7.0: exit reason breakdown
+        if "exit_reason" in df_trades.columns:
+            er_counts = df_trades["exit_reason"].value_counts()
+            reason_str = "  |  ".join(
+                f"{r}: {c}" for r, c in er_counts.items()
+            )
+            st.caption(f"Exits — {reason_str}")
+
+        # v7.0: highlight high-conviction trades (score >= 60)
+        if "score" in df_trades.columns:
+            high_conv = df_trades[df_trades["score"] >= 60]
+            if not high_conv.empty:
+                st.success(f"⭐ {len(high_conv)} high-conviction trade(s) today (score ≥ 60)")
+
+        # Display table — v7.0 columns
+        disp_cols = [c for c in [
+            "symbol", "direction", "entry_time", "entry_price",
+            "exit_price", "exit_reason", "pnl", "pnl_pct",
+            "score", "tfs_agreed"
+        ] if c in df_trades.columns]
+
+        if has_pnl:
+            def _color_pnl(val):
+                if not isinstance(val, (int, float)):
+                    return ""
+                return "color: green" if val >= 0 else "color: red"
+            pnl_cols = [c for c in ["pnl", "pnl_pct"] if c in df_trades.columns]
+            try:
+                styled_trades = df_trades[disp_cols].style.map(_color_pnl, subset=pnl_cols)
+            except AttributeError:
+                styled_trades = df_trades[disp_cols].style.applymap(_color_pnl, subset=pnl_cols)
+            st.dataframe(styled_trades, use_container_width=True, hide_index=True)
+        else:
+            st.dataframe(df_trades[disp_cols], use_container_width=True, hide_index=True)
+
+except Exception as e:
+    st.error(f"Trade log error: {e}")
+
+st.divider()
+st.caption(
+    f"Trading Bot v7.0 | {'Paper' if is_paper else 'LIVE'} | "
+    f"speedracer1186 | {datetime.now().strftime('%Y-%m-%d')}"
+)
