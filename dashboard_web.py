@@ -68,13 +68,30 @@ def _get_client():
     from alpaca.trading.client import TradingClient
     ak  = st.secrets.get("ALPACA_API_KEY",    "")
     sk  = st.secrets.get("ALPACA_SECRET_KEY", "")
-    pap = st.secrets.get("ALPACA_PAPER",      "true").lower() == "true"
+    pap = str(st.secrets.get("ALPACA_PAPER", "true")).lower() == "true"
+    if not ak or not sk:
+        raise ValueError(
+            f"API keys missing from Streamlit secrets. "
+            f"ALPACA_API_KEY={'SET' if ak else 'MISSING'}, "
+            f"ALPACA_SECRET_KEY={'SET' if sk else 'MISSING'}. "
+            f"Go to share.streamlit.io → your app → Settings → Secrets and add them."
+        )
     return TradingClient(api_key=ak, secret_key=sk, paper=pap), pap
 
 try:
     client, is_paper = _get_client()
 except Exception as e:
     st.error(f"Alpaca connection failed: {e}")
+    st.info(
+        "**To fix:** Go to share.streamlit.io → your app → ⋮ Settings → Secrets  \n"
+        "Make sure these keys exist with no extra quotes:  \n"
+        "```\n"
+        "ALPACA_API_KEY = \"PKxxxxxxxxx\"\n"
+        "ALPACA_SECRET_KEY = \"xxxxxxxxxx\"\n"
+        "ALPACA_PAPER = \"true\"\n"
+        "```\n"
+        "Then click **Reboot app** from the ⋮ menu."
+    )
     st.stop()
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -115,11 +132,15 @@ def _fetch_session_trades() -> pd.DataFrame:
     except Exception:
         return pd.DataFrame()
 
-# ── Auto-refresh ──────────────────────────────────────────────────────────────
-st.markdown(
-    """<meta http-equiv="refresh" content="30">""",
-    unsafe_allow_html=True,
-)
+# ── Auto-refresh (preserves login session state) ─────────────────────────────
+# Uses streamlit-autorefresh instead of meta http-equiv which wipes session state
+try:
+    from streamlit_autorefresh import st_autorefresh
+    st_autorefresh(interval=30_000, key="dashboard_refresh")
+except ImportError:
+    # Fallback: show manual refresh button — do NOT use meta refresh (logs you out)
+    if st.button("🔄 Refresh", key="manual_refresh"):
+        st.rerun()
 
 # ── Header ────────────────────────────────────────────────────────────────────
 mode    = "🟡 PAPER" if is_paper else "🔴 LIVE"
