@@ -212,12 +212,14 @@ with left:
                     "Current":  f"${current:.2f}",
                     "Cost":     f"${cost:,.0f}",
                     "Deployed": f"{cost/equity*100:.1f}%" if equity > 0 else "-",
-                    "P&L $":    round(unreal, 2),
-                    "P&L %":    round(unr_pct, 2),
+                    "P&L $":    f"${unreal:+.2f}",
+                    "P&L %":    f"{unr_pct:+.2f}%",
                 })
             df_pos = pd.DataFrame(rows)
 
             def _color_pnl(val):
+                if isinstance(val, str):
+                    return "color: green" if (val.startswith("$+") or val.startswith("+")) else "color: red" if "-" in val else ""
                 if not isinstance(val, (int, float)):
                     return ""
                 return "color: green" if val >= 0 else "color: red"
@@ -273,25 +275,28 @@ with right:
     st.markdown("**Exit Mode:**")
     st.success("🔄 Swing Hold (default)")
 
-    # Crypto hybrid regime
-    st.markdown("**Crypto Regime**")
+    # BTC Regime — reads btc_regime.txt pushed by bot to GitHub every scan
+    st.markdown("**BTC Regime**")
     try:
-        if not sess_df.empty and "reasoning" in sess_df.columns:
-            crypto_rows = sess_df[sess_df["symbol"].isin(["BTC/USD", "ETH/USD"])]
-            if not crypto_rows.empty:
-                last_reason = str(crypto_rows.iloc[-1]["reasoning"])
-                if "RANGING" in last_reason:
-                    st.info("📊 RANGING")
-                elif "TRENDING" in last_reason:
-                    st.success("📈 TRENDING")
-                else:
-                    st.warning("➡ NEUTRAL")
+        _repo  = st.secrets.get("GITHUB_REPO", "speedracer1186/Trading-Bot-Dashboard")
+        _tok   = st.secrets.get("GITHUB_TOKEN", "")
+        _hdrs  = {"Authorization": f"token {_tok}"} if _tok else {}
+        _r     = requests.get(
+            f"https://raw.githubusercontent.com/{_repo}/main/btc_regime.txt",
+            headers=_hdrs, timeout=5)
+        if _r.status_code == 200 and _r.text.strip():
+            _rt = _r.text.strip()
+            _ts = _rt.split("|")[-1].strip() if "|" in _rt else ""
+            if "RANGING" in _rt:
+                st.info(f"📊 RANGING  {_ts}")
+            elif "TRENDING" in _rt:
+                st.success(f"📈 TRENDING  {_ts}")
             else:
-                st.caption("No crypto signals today")
+                st.warning(f"➡ NEUTRAL  {_ts}")
         else:
-            st.caption("Awaiting session data")
+            st.caption("BTC/USD: monitoring (no regime data yet)")
     except Exception:
-        st.caption("Regime: unknown")
+        st.caption("Regime: checking...")
 
     st.divider()
 
@@ -382,6 +387,8 @@ try:
 
         if has_pnl:
             def _color_pnl(val):
+                if isinstance(val, str):
+                    return "color: green" if (val.startswith("$+") or val.startswith("+")) else "color: red" if "-" in val else ""
                 if not isinstance(val, (int, float)):
                     return ""
                 return "color: green" if val >= 0 else "color: red"
