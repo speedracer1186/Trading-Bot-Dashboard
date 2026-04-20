@@ -147,7 +147,7 @@ mode    = "🟡 PAPER" if is_paper else "🔴 LIVE"
 mstatus = _market_status()
 mcolor  = "green" if mstatus == "OPEN" else "orange" if "opens" in mstatus else "red"
 
-st.markdown(f"# 📈 Trading Bot v7.3 &nbsp;&nbsp; {mode}")
+st.markdown(f"# 📈 Trading Bot v7.31 &nbsp;&nbsp; {mode}")
 st.caption(
     f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ET  "
     f"· Auto-refreshes every 30s  "
@@ -165,7 +165,22 @@ try:
     last_equity  = float(getattr(acct, "last_equity", equity))
     daily_pl     = equity - last_equity
     daily_pl_pct = (daily_pl / last_equity * 100) if last_equity > 0 else 0.0
-    DAILY_GOAL   = 2_000.0
+
+    # v7.31: dynamic daily goal based on capital tier (inline tier lookup)
+    def _dashboard_daily_goal(eq):
+        _t = [
+            (0,     1500,    40),   (1500,  2500,   70),
+            (2500,  5000,   110),   (5000, 10000,  190),
+            (10000, 25000,  350),   (25000, 50000, 650),
+            (50000, 75000,  940),   (75000, 100000, 1090),
+        ]
+        for lo, hi, dly in _t:
+            if lo <= eq < hi:
+                return float(dly)
+        if eq >= 100000:
+            return max(1000.0, eq * 0.010)  # Elite scales with equity
+        return 40.0  # fallback to Seed
+    DAILY_GOAL = _dashboard_daily_goal(equity)
 
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Equity",       f"${equity:,.2f}")
@@ -174,10 +189,10 @@ try:
     c4.metric("Daily P&L",    f"${daily_pl:+,.2f}", f"{daily_pl_pct:+.2f}%",
               delta_color="normal")
     c5.metric("Goal Progress",
-              f"{min(daily_pl / DAILY_GOAL * 100, 100):.0f}%",
+              f"{min(daily_pl / DAILY_GOAL * 100, 100):.0f}%" if DAILY_GOAL > 0 else "—",
               f"target ${DAILY_GOAL:,.0f}/day", delta_color="off")
 
-    bar_pct = min(max(daily_pl / DAILY_GOAL, 0), 1.0)
+    bar_pct = min(max(daily_pl / DAILY_GOAL, 0), 1.0) if DAILY_GOAL > 0 else 0
     st.progress(bar_pct, text=f"Daily goal: ${daily_pl:+,.2f} / ${DAILY_GOAL:,.0f}")
 
 except Exception as e:
@@ -240,17 +255,34 @@ with right:
     # Market status
     st.markdown(f"**Market:** :{mcolor}[{mstatus}]")
 
-    # Circuit breaker (v7.3: scaled for $1k account)
+    # Circuit breaker (v7.31: scaled to tier max loss — warn at 50%, danger at 80%)
     st.markdown("**Circuit breaker:**")
-    if daily_pl < -100:
+    # Compute tier max loss first (used for thresholds + display)
+    def _dashboard_max_loss(eq):
+        _t = [
+            (0,     1500,    150),  (1500,  2500,   250),
+            (2500,  5000,    500),  (5000, 10000,  1000),
+            (10000, 25000,  2000),  (25000, 50000, 3500),
+            (50000, 75000,  5000),  (75000, 100000, 7500),
+        ]
+        for lo, hi, ml in _t:
+            if lo <= eq < hi:
+                return float(ml)
+        if eq >= 100000:
+            return max(10000.0, eq * 0.10)
+        return 150.0
+    _max_loss = _dashboard_max_loss(equity)
+    _danger   = -_max_loss * 0.80
+    _warn     = -_max_loss * 0.50
+    if daily_pl < _danger:
         st.error(f"⛔ DANGER: ${daily_pl:+,.0f}")
-    elif daily_pl < -50:
+    elif daily_pl < _warn:
         st.warning(f"⚠ Caution: ${daily_pl:+,.0f}")
     else:
         st.success("🟢 OK")
 
     st.markdown(f"**Daily goal:** ${DAILY_GOAL:,.0f} remaining")
-    st.markdown(f"**Max loss limit:** $100")
+    st.markdown(f"**Max loss limit:** ${_max_loss:,.0f}")
 
     st.divider()
 
@@ -276,6 +308,64 @@ with right:
             st.caption("0.0% — no positions")
     except Exception:
         st.caption("unavailable")
+
+    st.divider()
+
+    # v7.31: Capital Tier Progression panel
+    st.markdown("**Capital Tier**")
+    try:
+        # Inline tier logic (dashboard is stateless; reproduce the minimum
+        # needed without importing the bot's src/ package)
+        _TIERS = [
+            (0,    1500,    "0 Seed",      0.040, 40,    200,    150),
+            (1500, 2500,    "1 Sprout",    0.035, 70,    350,    250),
+            (2500, 5000,    "2 Grow",      0.030, 110,   550,    500),
+            (5000, 10000,   "3 Establish", 0.025, 190,   950,    1000),
+            (10000, 25000,  "4 Build",     0.020, 350,   1750,   2000),
+            (25000, 50000,  "5 Scale",     0.0175,650,   3250,   3500),
+            (50000, 75000,  "6 Expand",    0.015, 940,   4700,   5000),
+            (75000, 100000, "7 Pro",       0.0125,1090,  5450,   7500),
+            (100000, None,  "8 Elite",     0.010, 1000,  5000,   10000),
+        ]
+        _eq = float(equity) if equity else 0.0
+        _tier = None
+        for lo, hi, name, rate, dly, wk, loss in _TIERS:
+            if _eq >= lo and (hi is None or _eq < hi):
+                _tier = (lo, hi, name, rate, dly, wk, loss)
+                break
+        if _tier is None:
+            _tier = _TIERS[0]
+        lo, hi, name, rate, dly, wk, loss = _tier
+        # For Elite: daily/weekly target scales with equity
+        if hi is None:
+            dly = max(dly, _eq * rate)
+            wk  = max(wk,  _eq * rate * 5)
+            loss = max(loss, _eq * 0.10)
+
+        st.markdown(f"**T{name}**")
+        st.caption(f"Daily rate: {rate*100:.2f}%")
+        c_a, c_b = st.columns(2)
+        with c_a:
+            st.caption(f"Daily target: ${dly:,.0f}")
+            st.caption(f"Max loss: ${loss:,.0f}")
+        with c_b:
+            st.caption(f"Weekly target: ${wk:,.0f}")
+            st.caption(f"Equity: ${_eq:,.0f}")
+
+        # Progress to next tier
+        if hi is not None:
+            progress = (_eq - lo) / (hi - lo) if (hi - lo) > 0 else 0.0
+            progress = max(0.0, min(1.0, progress))
+            remaining = max(0.0, hi - _eq)
+            next_name = _TIERS[min(_tier[0] // 1, len(_TIERS)-1)][2] if False else next(
+                (n[2] for n in _TIERS if n[0] >= hi), "Elite")
+            st.progress(progress)
+            st.caption(f"Progress to next tier ({next_name}): ${remaining:,.0f} remaining")
+        else:
+            st.progress(1.0)
+            st.caption("Top tier — scales with equity")
+    except Exception as _te:
+        st.caption(f"tier unavailable ({_te})")
 
     st.divider()
 
