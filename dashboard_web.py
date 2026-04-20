@@ -147,7 +147,7 @@ mode    = "🟡 PAPER" if is_paper else "🔴 LIVE"
 mstatus = _market_status()
 mcolor  = "green" if mstatus == "OPEN" else "orange" if "opens" in mstatus else "red"
 
-st.markdown(f"# 📈 Trading Bot v7.0 &nbsp;&nbsp; {mode}")
+st.markdown(f"# 📈 Trading Bot v7.3 &nbsp;&nbsp; {mode}")
 st.caption(
     f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ET  "
     f"· Auto-refreshes every 30s  "
@@ -240,22 +240,48 @@ with right:
     # Market status
     st.markdown(f"**Market:** :{mcolor}[{mstatus}]")
 
-    # Circuit breaker
+    # Circuit breaker (v7.3: scaled for $1k account)
     st.markdown("**Circuit breaker:**")
-    if daily_pl < -1500:
+    if daily_pl < -100:
         st.error(f"⛔ DANGER: ${daily_pl:+,.0f}")
-    elif daily_pl < -500:
+    elif daily_pl < -50:
         st.warning(f"⚠ Caution: ${daily_pl:+,.0f}")
     else:
         st.success("🟢 OK")
 
     st.markdown(f"**Daily goal:** ${DAILY_GOAL:,.0f} remaining")
-    st.markdown(f"**Max loss limit:** $1,000")
+    st.markdown(f"**Max loss limit:** $100")
 
     st.divider()
 
-    # v7.0: PDT counter
-    st.markdown("**PDT Day Trades**")
+    # v7.3: Margin utilization bar (replaces PDT as primary risk gate)
+    st.markdown("**Margin Utilization**")
+    try:
+        # Pull from open positions we already have on the page
+        if 'positions' in dir() and positions:
+            total_notional = sum(
+                abs(float(p.qty)) * float(p.current_price if hasattr(p, 'current_price') else p.avg_entry_price)
+                for p in positions
+            )
+            util = total_notional / equity if equity > 0 else 0.0
+            pct = util * 100
+            if util >= 0.80:
+                st.error(f"⛔ {pct:.1f}% (cap 80%)")
+            elif util >= 0.70:
+                st.warning(f"⚠ {pct:.1f}% (warn 70%)")
+            else:
+                st.success(f"🟢 {pct:.1f}%")
+            st.progress(min(util, 1.0))
+        else:
+            st.caption("0.0% — no positions")
+    except Exception:
+        st.caption("unavailable")
+
+    st.divider()
+
+    # v7.3: PDT Mode indicator (replaces hardcoded 0/3 counter)
+    st.markdown("**PDT Mode**")
+    # Read from session trades for counter display
     try:
         sess_df = _fetch_session_trades()
         if not sess_df.empty and "entry_time" in sess_df.columns and "exit_time" in sess_df.columns:
@@ -264,12 +290,19 @@ with right:
                 sess_df["entry_time"].astype(str).str[:10] == sess_df.get("exit_time", sess_df["entry_time"]).astype(str).str[:10]
             ]
             pdt_count = len(same_day[same_day["entry_time"].astype(str).str[:10] == today_str])
-            color = "red" if pdt_count >= 3 else "orange" if pdt_count == 2 else "green"
-            st.markdown(f":{color}[{pdt_count}/3 today]")
         else:
-            st.caption("0/3 today")
+            pdt_count = 0
     except Exception:
-        st.caption("0/3 today")
+        pdt_count = 0
+
+    # Mode indicator — config values are embedded in bot, dashboard shows post-SEC
+    # elimination context so user knows the rule structure changed April 14, 2026
+    st.info(
+        "SEC eliminated PDT rule April 14, 2026. "
+        "Bot runs in toggleable mode (Full Gate / Warn-Only / Disabled) "
+        "controlled by PDT_ENABLED and PDT_WARN_ONLY in config.py."
+    )
+    st.caption(f"Today: {pdt_count} same-day round trips recorded")
 
     # v7.0: Swing hold mode
     st.markdown("**Exit Mode:**")
