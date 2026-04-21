@@ -147,7 +147,7 @@ mode    = "🟡 PAPER" if is_paper else "🔴 LIVE"
 mstatus = _market_status()
 mcolor  = "green" if mstatus == "OPEN" else "orange" if "opens" in mstatus else "red"
 
-st.markdown(f"# 📈 Trading Bot v7.31.1 &nbsp;&nbsp; {mode}")
+st.markdown(f"# 📈 Trading Bot v7.31.2 &nbsp;&nbsp; {mode}")
 st.caption(
     f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ET  "
     f"· Auto-refreshes every 30s  "
