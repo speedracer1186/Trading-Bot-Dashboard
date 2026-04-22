@@ -1,0 +1,2 @@
+closed_time,symbol,direction,qty,entry_price,exit_price,pnl,pnl_pct,entry_time,exit_reason,score,tfs_agreed,mode
+2026-04-22T10:36:55.978004,SPY,buy,1,710.04,710.04,0.0,0.0,2026-04-22T10:33:01.869136,stop_or_tp,47,0,paper
