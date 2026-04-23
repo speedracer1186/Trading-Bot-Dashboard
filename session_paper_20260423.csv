@@ -1,0 +1,4 @@
+closed_time,symbol,direction,qty,entry_price,exit_price,pnl,pnl_pct,entry_time,exit_reason,score,tfs_agreed,mode
+2026-04-23T08:46:25.040251,ARKK260501C00079000,buy,1,2.31,1.46,-85.0,-36.8,,holding,0,0,paper
+2026-04-23T08:46:25.040276,HOOD,buy,2,88.105,87.2,-1.81,-1.03,,holding,0,0,paper
+2026-04-23T08:46:25.040290,IONQ260501C00049000,buy,1,2.75,2.1,-65.0,-23.64,,holding,0,0,paper
