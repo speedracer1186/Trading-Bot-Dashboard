@@ -1,3 +1,7 @@
 closed_time,symbol,direction,qty,entry_price,exit_price,pnl,pnl_pct,entry_time,exit_reason,score,tfs_agreed,mode
 2026-04-24T08:44:16.951120,GME.WS,buy,14,3.6607,3.6,-0.85,-1.66,,holding,0,0,paper
 2026-04-24T08:48:07.909880,NVDA,buy,1,200.72,200.72,0.0,0.0,2026-04-24T08:45:42.083000,stop_or_tp,45,0,paper
+2026-04-24T15:24:59.601562,GME.WS,buy,14,3.6607,3.6988,0.53,1.04,,holding,0,0,paper
+2026-04-24T15:24:59.601589,PLTR,buy,1,139.03,142.73,3.7,2.66,2026-04-24T09:31:38.622208,holding,41,0,paper
+2026-04-24T15:24:59.601602,SOFI260501P00018500,buy,1,1.09,0.98,-11.0,-10.09,,holding,0,0,paper
+2026-04-24T15:24:59.601612,XLE260501C00057000,buy,6,0.815,0.85,21.0,4.29,,holding,0,0,paper
