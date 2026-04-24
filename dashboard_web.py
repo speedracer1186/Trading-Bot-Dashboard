@@ -913,8 +913,10 @@ with _ccol1:
     if _regime == "unknown":
         st.caption("Regime file not accessible (remote dashboard)")
     else:
-        # btc_regime.txt is "RANGING | 14:32 ET" format
-        st.markdown(f"`{_regime}`")
+        # btc_regime.txt format (v7.36.1+): single word "RANGING"/"TRENDING"/"NEUTRAL".
+        # Pre-v7.36.1 files had " | HH:MM ET" suffix which is stripped on display.
+        _regime_display = _regime.split(" | ", 1)[0].strip() if " | " in _regime else _regime
+        st.markdown(f"`{_regime_display}`")
 
 # Scalper status (best-effort: read from latest bot init log line)
 with _ccol2:
