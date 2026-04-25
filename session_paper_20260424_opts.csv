@@ -1,2 +1,0 @@
-symbol,direction,entry_time,entry_price,exit_time,exit_price,exit_reason,qty,pnl,pnl_pct,score,tfs_agreed,reasoning,contract_symbol,strike,option_type,dte_entry,iv_rank,hv_entry,regime,regime_multiplier,dd_at_entry,cluster,gate_tags
-SOFI,sell,2026-04-24T08:49:40,18.34,2026-04-24T08:57:31,0.0,closed,1,0.0,0.0,43.0,0,V7.33 weekly K=18.50 PUT prem~$1.02 spread=4.9% regime=uptrend gates=CTR_REG,SOFI260501P00018500,18.5,put,7,,,uptrend,0.5,0.0,MEME,CTR_REG
