@@ -31,7 +31,7 @@ import streamlit as st
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="Trading Bot v7.36",
+    page_title="Trading Bot Dashboard",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -343,30 +343,145 @@ except ImportError:
     if st.button("🔄 Refresh", key="manual_refresh"):
         st.rerun()
 
-# ── Header ────────────────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  DASHBOARD 2.0 — v7.36.3
+# ─────────────────────────────────────────────────────────────────────────────
+#  Designed for non-technical readers: every metric has a plain-English
+#  explanation. Trading-jargon terms (Sharpe, profit factor, etc) live in
+#  expandable tooltips under each metric. Replaces all deprecated
+#  use_container_width=True with width="stretch" since use_container_width
+#  was removed by Streamlit after 2025-12-31.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _resolve_version() -> str:
+    """Pull version dynamically from src/version.py so dashboard
+    never goes stale relative to the bot it monitors."""
+    import os, re
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))
+        version_file = os.path.join(here, "..", "src", "version.py")
+        if os.path.exists(version_file):
+            with open(version_file) as f:
+                content = f.read()
+            m = re.search(r'VERSION_SHORT\s*=\s*["\']([^"\']+)["\']', content)
+            if m:
+                return m.group(1)
+    except Exception:
+        pass
+    return "v7.36.3"
+
+
+def _compute_performance_metrics(trades_df: pd.DataFrame) -> dict:
+    """Compute headline performance metrics from a trades dataframe.
+
+    Returns a dict with the metrics safe non-traders can interpret with
+    inline tooltips, computed only over CLOSED trades (rows with a
+    non-zero pnl). Fields:
+      total_trades, wins, losses, win_rate, total_pnl,
+      avg_win, avg_loss, profit_factor, payoff_ratio, expectancy,
+      sharpe, max_drawdown, max_drawdown_pct, current_streak
+
+    All values are calibrated for an algorithmic bot rather than a
+    discretionary trader, so e.g. Sharpe is computed from per-trade
+    returns rather than per-day returns since a typical bot day has
+    1-30 trades.
+    """
+    out = {
+        "total_trades": 0, "wins": 0, "losses": 0, "win_rate": 0.0,
+        "total_pnl": 0.0, "avg_win": 0.0, "avg_loss": 0.0,
+        "profit_factor": 0.0, "payoff_ratio": 0.0, "expectancy": 0.0,
+        "sharpe": 0.0, "max_drawdown": 0.0, "max_drawdown_pct": 0.0,
+        "current_streak": "—",
+    }
+    if trades_df is None or trades_df.empty or "pnl" not in trades_df.columns:
+        return out
+
+    closed = trades_df[trades_df["pnl"].fillna(0).astype(float) != 0].copy()
+    closed["pnl"] = closed["pnl"].astype(float)
+    if closed.empty:
+        return out
+
+    pnl = closed["pnl"]
+    wins = pnl[pnl > 0]
+    losses = pnl[pnl < 0]
+
+    out["total_trades"] = int(len(closed))
+    out["wins"] = int(len(wins))
+    out["losses"] = int(len(losses))
+    out["win_rate"] = (out["wins"] / out["total_trades"] * 100) if out["total_trades"] else 0.0
+    out["total_pnl"] = float(pnl.sum())
+    out["avg_win"] = float(wins.mean()) if not wins.empty else 0.0
+    out["avg_loss"] = float(losses.mean()) if not losses.empty else 0.0  # negative
+
+    # Profit factor: gross win $ / gross loss $.  >1 = profitable.
+    gross_win = float(wins.sum()) if not wins.empty else 0.0
+    gross_loss = float(abs(losses.sum())) if not losses.empty else 0.0
+    out["profit_factor"] = (gross_win / gross_loss) if gross_loss > 0 else (
+        float("inf") if gross_win > 0 else 0.0
+    )
+    # Payoff ratio: avg win / avg loss size.  >1 = winners bigger than losers.
+    out["payoff_ratio"] = (out["avg_win"] / abs(out["avg_loss"])) if out["avg_loss"] != 0 else 0.0
+    # Expectancy per trade (in $)
+    out["expectancy"] = float(pnl.mean())
+
+    # Sharpe per-trade: mean(pnl) / stdev(pnl). No risk-free rate adjustment
+    # since per-trade horizon is too short for it to matter.
+    if len(pnl) > 1 and pnl.std() > 0:
+        out["sharpe"] = float(pnl.mean() / pnl.std())
+
+    # Max drawdown: running peak of cumulative pnl, max gap below it
+    cum = pnl.cumsum()
+    running_max = cum.cummax()
+    drawdown = cum - running_max
+    out["max_drawdown"] = float(drawdown.min()) if not drawdown.empty else 0.0
+    if running_max.max() > 0:
+        out["max_drawdown_pct"] = float(out["max_drawdown"] / running_max.max() * 100)
+
+    # Current streak (consecutive wins/losses at the tail)
+    streak_n = 0
+    streak_sign = None
+    for v in reversed(pnl.tolist()):
+        if v == 0:
+            continue
+        sign = "W" if v > 0 else "L"
+        if streak_sign is None:
+            streak_sign = sign
+            streak_n = 1
+        elif sign == streak_sign:
+            streak_n += 1
+        else:
+            break
+    if streak_sign:
+        out["current_streak"] = f"{streak_n}{streak_sign}"
+    return out
+
+
+# ── Header (dynamic version, mode badge, market state) ───────────────────────
+_VERSION = _resolve_version()
 mode    = "🟡 PAPER" if is_paper else "🔴 LIVE"
 mstatus = _market_status()
 mcolor  = "green" if mstatus == "OPEN" else "orange" if "opens" in mstatus else "red"
 
-st.markdown(f"# 📈 Trading Bot v7.36 &nbsp;&nbsp; {mode}")
+st.markdown(
+    f"# 📈 Trading Bot {_VERSION} &nbsp;&nbsp; {mode}"
+)
 st.caption(
     f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ET  "
-    f"· Auto-refreshes every 30s  "
-    f"· Market: :{mcolor}[{mstatus}]"
+    f"·  Auto-refreshes every 30s  "
+    f"·  Market: :{mcolor}[{mstatus}]"
 )
 
-# ── Bot health banner (v7.36 fix #5) ─────────────────────────────────────────
+
+# ── Bot health banner ────────────────────────────────────────────────────────
 _health = _bot_health_check()
 if _health.get("available"):
     _hcols = st.columns([2, 1, 1, 1])
     _status = _health["status"]
     _status_color = {
-        "HEALTHY":  "green",
-        "WARNINGS": "orange",
-        "ERRORS":   "red",
-        "STALE":    "red",
-        "NO_DATA":  "gray",
-        "UNKNOWN":  "gray",
+        "HEALTHY":  "green",  "WARNINGS": "orange", "ERRORS":   "red",
+        "STALE":    "red",    "NO_DATA":  "gray",   "UNKNOWN":  "gray",
     }.get(_status, "gray")
     _last_ts = _health.get("last_log_ts")
     _age = _health.get("age_minutes", 0)
@@ -382,7 +497,7 @@ if _health.get("available"):
     if _status == "STALE":
         st.error(
             f"⚠️ Bot log hasn't been updated in {_age:.0f} minutes. "
-            f"The bot may have crashed or hung. Check the terminal."
+            f"The bot may have crashed or hung — check the terminal."
         )
     elif _status == "ERRORS":
         st.warning(
@@ -390,15 +505,15 @@ if _health.get("available"):
             f"check trading_bot.log for details."
         )
 else:
-    # Dashboard running remotely without log access — show a hint
     st.caption(
-        "💡 Bot health panel unavailable (dashboard running remotely). "
+        "💡 Bot health panel unavailable (dashboard running remotely from bot). "
         "Run dashboard locally for log-based health checks."
     )
 
-# ── Account summary ───────────────────────────────────────────────────────────
+
+# ── Account summary (top-line numbers) ───────────────────────────────────────
 daily_pl = 0.0
-equity   = 0.0
+equity = 0.0
 try:
     acct         = client.get_account()
     equity       = float(acct.equity)
@@ -408,54 +523,59 @@ try:
     daily_pl     = equity - last_equity
     daily_pl_pct = (daily_pl / last_equity * 100) if last_equity > 0 else 0.0
 
-    # v7.31: dynamic daily goal based on capital tier (inline tier lookup)
+    # Daily goal lookup mirrors src/tier_manager.py
     def _dashboard_daily_goal(eq):
         _t = [
-            (0,     1500,    40),   (1500,  2500,   70),
-            (2500,  5000,   110),   (5000, 10000,  190),
-            (10000, 25000,  350),   (25000, 50000, 650),
-            (50000, 75000,  940),   (75000, 100000, 1090),
+            (0,     1500,    40),    (1500,  2500,   70),
+            (2500,  5000,   110),    (5000, 10000,  190),
+            (10000, 25000,  350),    (25000, 50000, 650),
+            (50000, 75000,  940),    (75000, 100000, 1090),
         ]
         for lo, hi, dly in _t:
             if lo <= eq < hi:
                 return float(dly)
         if eq >= 100000:
-            return max(1000.0, eq * 0.010)  # Elite scales with equity
-        return 40.0  # fallback to Seed
+            return max(1000.0, eq * 0.010)
+        return 40.0
     DAILY_GOAL = _dashboard_daily_goal(equity)
 
     c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Equity",       f"${equity:,.2f}")
-    c2.metric("Cash",         f"${cash:,.2f}")
-    c3.metric("Buying Power", f"${buying_pow:,.2f}")
-    c4.metric("Daily P&L",    f"${daily_pl:+,.2f}", f"{daily_pl_pct:+.2f}%",
-              delta_color="normal")
+    c1.metric("Account Value",
+              f"${equity:,.2f}",
+              help="Total worth of your account = cash + market value of all positions.")
+    c2.metric("Cash Available",
+              f"${cash:,.2f}",
+              help="Cash not currently invested. Used for new positions.")
+    c3.metric("Buying Power",
+              f"${buying_pow:,.2f}",
+              help="How much you can spend on new positions right now (stocks "
+                   "& options use buying power; crypto uses cash).")
+    c4.metric("Today's P&L",
+              f"${daily_pl:+,.2f}",
+              f"{daily_pl_pct:+.2f}%",
+              help="Profit or loss since yesterday's close. Green = up, red = down.")
     c5.metric("Goal Progress",
               f"{min(daily_pl / DAILY_GOAL * 100, 100):.0f}%" if DAILY_GOAL > 0 else "—",
-              f"target ${DAILY_GOAL:,.0f}/day", delta_color="off")
+              f"target ${DAILY_GOAL:,.0f}/day",
+              delta_color="off",
+              help="How close today's P&L is to today's profit goal. The goal "
+                   "scales with your account size.")
 
     bar_pct = min(max(daily_pl / DAILY_GOAL, 0), 1.0) if DAILY_GOAL > 0 else 0
     st.progress(bar_pct, text=f"Daily goal: ${daily_pl:+,.2f} / ${DAILY_GOAL:,.0f}")
 
-    # v7.36 fix #7: risk alerting — visible drawdown warnings.
-    # Pre-v7.36 the dashboard only showed the goal-progress bar; users
-    # had to mentally calculate whether drawdown was approaching limits.
-    # Now we explicitly flag thresholds:
-    #   ≥ -3% daily P&L: yellow warning
-    #   ≥ -6% daily P&L: orange warning (matches scaler soft-limit)
-    #   ≥ -8% daily P&L: red alert (matches scaler hard-stop)
-    # Equity-relative since absolute thresholds break across capital tiers.
+    # Drawdown alerts (preserved from v7.36)
     if equity > 0 and daily_pl < 0:
         _dl_pct = abs(daily_pl) / equity * 100
         if _dl_pct >= 8.0:
             st.error(
                 f"🚨 **HARD-STOP THRESHOLD REACHED** — daily drawdown "
-                f"-{_dl_pct:.2f}% (≥ 8%). Bot's SCALER should have "
+                f"-{_dl_pct:.2f}% (≥ 8%). Bot's risk-scaler should have "
                 f"halted entries. Verify in log."
             )
         elif _dl_pct >= 6.0:
             st.warning(
-                f"⚠️ **SCALER soft-limit zone** — daily drawdown "
+                f"⚠️ **Risk-scaler soft-limit zone** — daily drawdown "
                 f"-{_dl_pct:.2f}% (≥ 6%). Entry sizes reduced to 50%."
             )
         elif _dl_pct >= 3.0:
@@ -463,13 +583,281 @@ try:
                 f"📉 Drawdown caution: daily P&L -{_dl_pct:.2f}% "
                 f"(approaching 6% soft-limit)."
             )
-
 except Exception as e:
     st.error(f"Account error: {e}")
+    st.caption("Check Streamlit secrets and Alpaca API key validity.")
 
 st.divider()
 
-# ── Open positions + risk/status panel ───────────────────────────────────────
+
+# ── Performance metrics (NEW — Dashboard 2.0 headline panel) ─────────────────
+st.subheader("📊 Performance Metrics")
+st.caption(
+    "How well the bot is trading, computed across the last 7 days of "
+    "completed trades. Hover ❓ on any metric for what it means."
+)
+
+try:
+    df_recent_trades = _fetch_recent_session_trades(days=7)
+    metrics = _compute_performance_metrics(df_recent_trades)
+
+    if metrics["total_trades"] == 0:
+        st.info(
+            "💡 No completed trades yet in the last 7 days. Metrics will populate "
+            "as the bot trades. Open positions don't count — only closed trades."
+        )
+    else:
+        # Row 1 — primary "is the bot working?" metrics
+        m1, m2, m3, m4, m5 = st.columns(5)
+        m1.metric(
+            "Total Trades",
+            f"{metrics['total_trades']}",
+            f"{metrics['wins']}W / {metrics['losses']}L",
+            delta_color="off",
+            help="How many trades were closed in the last 7 days. "
+                 "Wins/losses shown below."
+        )
+        # Win rate with green/red color cue
+        wr = metrics["win_rate"]
+        wr_delta_color = "normal" if wr >= 50 else "inverse"
+        m2.metric(
+            "Win Rate",
+            f"{wr:.1f}%",
+            f"{'above' if wr >= 50 else 'below'} 50%",
+            delta_color=wr_delta_color,
+            help="Percentage of trades that were profitable. Above 50% means "
+                 "more wins than losses — but doesn't tell the whole story; "
+                 "see Profit Factor."
+        )
+        m3.metric(
+            "Total P&L (7d)",
+            f"${metrics['total_pnl']:+,.2f}",
+            help="Sum of all closed-trade profits and losses over the last "
+                 "7 calendar days."
+        )
+        m4.metric(
+            "Avg Per Trade",
+            f"${metrics['expectancy']:+,.2f}",
+            help="Average dollar P&L per closed trade. This is your 'edge' "
+                 "on each trade. If this is positive long-term, the bot is "
+                 "profitable."
+        )
+        m5.metric(
+            "Streak",
+            metrics["current_streak"],
+            help="Current consecutive wins (W) or losses (L). Long losing "
+                 "streaks may be normal — what matters is the average."
+        )
+
+        # Row 2 — risk-adjusted / quality metrics
+        st.markdown("##### Risk-Adjusted Quality")
+        q1, q2, q3, q4, q5 = st.columns(5)
+
+        # Profit Factor: handle inf
+        pf = metrics["profit_factor"]
+        pf_str = f"{pf:.2f}" if pf != float("inf") else "∞"
+        pf_label = (
+            "🟢 Excellent" if pf >= 2.0
+            else "🟢 Good" if pf >= 1.5
+            else "🟡 Marginal" if pf >= 1.0
+            else "🔴 Losing"
+        )
+        q1.metric(
+            "Profit Factor", pf_str, pf_label,
+            delta_color="off",
+            help="Total $ won ÷ total $ lost. Above 1.0 = profitable; "
+                 "above 1.5 = good; above 2.0 = excellent. This handles "
+                 "uneven win/loss sizes that win rate misses."
+        )
+
+        # Sharpe per-trade
+        sharpe = metrics["sharpe"]
+        sharpe_label = (
+            "🟢 Excellent" if sharpe >= 0.5
+            else "🟢 Good" if sharpe >= 0.25
+            else "🟡 Marginal" if sharpe >= 0.0
+            else "🔴 Negative"
+        )
+        q2.metric(
+            "Sharpe (per-trade)",
+            f"{sharpe:+.2f}",
+            sharpe_label,
+            delta_color="off",
+            help="Average P&L divided by P&L volatility. Higher = more "
+                 "consistent results. For per-trade Sharpe: above 0.25 is "
+                 "good, above 0.5 is excellent. (Note: this is calculated "
+                 "per-trade for an algo bot, not annualized like in funds.)"
+        )
+
+        # Payoff ratio
+        po = metrics["payoff_ratio"]
+        po_label = (
+            "🟢 Good" if po >= 1.5
+            else "🟡 OK" if po >= 1.0
+            else "🔴 Risky"
+        )
+        q3.metric(
+            "Payoff Ratio",
+            f"{po:.2f}x",
+            po_label,
+            delta_color="off",
+            help="Average win size ÷ average loss size. 1.5x means winners "
+                 "are 50% bigger than losers. With low win rates you need "
+                 "high payoff ratio; with high win rates you can survive lower."
+        )
+
+        # Avg win / avg loss
+        q4.metric(
+            "Avg Win",
+            f"${metrics['avg_win']:+,.2f}",
+            help="Average profit on winning trades. Compare to Avg Loss to "
+                 "see if winners are bigger than losers (you want them to be)."
+        )
+        q5.metric(
+            "Avg Loss",
+            f"${metrics['avg_loss']:+,.2f}",
+            help="Average loss on losing trades. Should be smaller in absolute "
+                 "value than Avg Win for a healthy strategy."
+        )
+
+        # Drawdown row
+        st.markdown("##### Drawdown")
+        d1, d2, d3 = st.columns([1, 1, 2])
+        d1.metric(
+            "Max Drawdown ($)",
+            f"${metrics['max_drawdown']:,.2f}",
+            help="Largest peak-to-valley drop the bot's cumulative P&L "
+                 "experienced. Lower (less negative) is better. This tells "
+                 "you the worst-case streak you've actually lived through."
+        )
+        d2.metric(
+            "Max Drawdown (%)",
+            f"{metrics['max_drawdown_pct']:.1f}%",
+            help="Same as above but as a percent of the prior peak. "
+                 "Above 20% is concerning; above 30% suggests a strategy "
+                 "review is needed."
+        )
+        with d3:
+            st.markdown(
+                f"**What this means in plain English:** "
+                f"Your bot has been right "
+                f"{metrics['win_rate']:.0f}% of the time, and on average each "
+                f"trade adds **${metrics['expectancy']:+,.2f}** to your account. "
+                f"For every $1 it loses on bad trades, it makes "
+                f"**${metrics['profit_factor']:.2f}** on good ones. "
+            )
+except Exception as e:
+    st.caption(f"Performance metrics unavailable: {e}")
+
+st.divider()
+
+
+# ── Equity curve chart (NEW) ─────────────────────────────────────────────────
+st.subheader("📈 Equity Curve — last 7 days")
+st.caption(
+    "Cumulative profit & loss over time across all closed trades. "
+    "An upward-sloping line means the bot is making money over time."
+)
+
+try:
+    if not df_recent_trades.empty and "pnl" in df_recent_trades.columns:
+        df_curve = df_recent_trades[df_recent_trades["pnl"].fillna(0).astype(float) != 0].copy()
+        if not df_curve.empty:
+            df_curve["pnl"] = df_curve["pnl"].astype(float)
+
+            # Build x-axis: prefer timestamp column, fallback to index
+            time_col = None
+            for cand in ("entry_time", "timestamp", "datetime", "exit_time"):
+                if cand in df_curve.columns:
+                    time_col = cand
+                    break
+            if time_col:
+                try:
+                    df_curve[time_col] = pd.to_datetime(df_curve[time_col])
+                    df_curve = df_curve.sort_values(time_col)
+                except Exception:
+                    pass
+
+            df_curve["cumulative_pnl"] = df_curve["pnl"].cumsum()
+            chart_df = df_curve[[time_col or df_curve.columns[0], "cumulative_pnl"]].copy() \
+                       if time_col else df_curve[["cumulative_pnl"]].copy()
+            if time_col:
+                chart_df = chart_df.set_index(time_col)
+            st.line_chart(chart_df, height=300)
+        else:
+            st.info("No closed trades yet to chart.")
+    else:
+        st.info("Equity curve will appear once trades are completed.")
+except Exception as e:
+    st.caption(f"Equity curve error: {e}")
+
+st.divider()
+
+
+# ── Strategy breakdown (NEW) ─────────────────────────────────────────────────
+st.subheader("🎯 Strategy Breakdown")
+st.caption(
+    "Where the bot's recent profits & losses came from. Helps spot which "
+    "strategies are working and which are dragging."
+)
+
+try:
+    if not df_recent_trades.empty:
+        # Try to identify strategy by exit_reason or strategy column
+        df_strat = df_recent_trades[df_recent_trades["pnl"].fillna(0).astype(float) != 0].copy()
+        df_strat["pnl"] = df_strat["pnl"].astype(float)
+
+        # Heuristic: derive strategy bucket from exit_reason or strategy field
+        def _strategy_bucket(row):
+            er = str(row.get("exit_reason", "")).lower()
+            sym = str(row.get("symbol", ""))
+            if er.startswith("scalp_"):
+                return "Crypto Scalp"
+            if "/" in sym:
+                return "Crypto Hybrid"
+            if len(sym) > 6 and any(c.isdigit() for c in sym):
+                return "Options"
+            return "Shares"
+
+        df_strat["strategy_bucket"] = df_strat.apply(_strategy_bucket, axis=1)
+        agg = df_strat.groupby("strategy_bucket").agg(
+            trades=("pnl", "count"),
+            total_pnl=("pnl", "sum"),
+            avg_pnl=("pnl", "mean"),
+            wins=("pnl", lambda s: int((s > 0).sum())),
+            losses=("pnl", lambda s: int((s < 0).sum())),
+        ).round(2).reset_index()
+        agg["win_rate_%"] = (agg["wins"] / agg["trades"] * 100).round(1)
+        agg = agg.sort_values("total_pnl", ascending=False)
+
+        s1, s2 = st.columns([2, 1])
+        with s1:
+            st.dataframe(
+                agg.rename(columns={
+                    "strategy_bucket": "Strategy",
+                    "trades": "Trades",
+                    "total_pnl": "Total P&L ($)",
+                    "avg_pnl": "Avg ($)",
+                    "wins": "W",
+                    "losses": "L",
+                    "win_rate_%": "Win %",
+                }),
+                width="stretch",
+                hide_index=True,
+            )
+        with s2:
+            chart_data = agg.set_index("strategy_bucket")["total_pnl"]
+            st.bar_chart(chart_data, height=200)
+            st.caption("Total P&L by strategy")
+    else:
+        st.info("Strategy breakdown will appear once trades are completed.")
+except Exception as e:
+    st.caption(f"Strategy breakdown error: {e}")
+
+st.divider()
+
+
+# ── Open positions ────────────────────────────────────────────────────────────
 left, right = st.columns([3, 1])
 
 with left:
@@ -477,578 +865,149 @@ with left:
     try:
         positions = client.get_all_positions()
         if not positions:
-            st.info("No open positions.")
+            st.info("📭 No open positions right now. The bot will open new "
+                    "ones when it finds high-probability setups.")
         else:
             rows = []
             total_cost = 0.0
             for p in positions:
-                # v7.36: support fractional crypto qty (was int(float(p.qty))
-                # which truncated 0.001 BTC to 0 and broke cost math).
                 raw_qty = float(p.qty)
-                entry   = float(p.avg_entry_price)
+                entry = float(p.avg_entry_price)
                 current = float(p.current_price)
-                # Detect asset class for display + notional math
                 _asset_class = str(getattr(p, "asset_class", "") or "").lower()
                 _is_option = (_asset_class == "us_option")
                 _is_crypto = (_asset_class == "crypto") or ("/" in str(p.symbol))
-                # Correct notional by instrument
                 if _is_option:
-                    cost = abs(raw_qty) * entry * 100.0   # options ×100 multiplier
+                    cost = abs(raw_qty) * entry * 100.0
                 else:
                     cost = abs(raw_qty) * entry
-                unreal  = float(p.unrealized_pl)
+                unreal = float(p.unrealized_pl)
                 unr_pct = float(p.unrealized_plpc) * 100
                 total_cost += cost
-                # Qty display: fractional for crypto, integer for shares/options
-                if _is_crypto:
-                    qty_display = f"{raw_qty:.6f}".rstrip("0").rstrip(".")
-                    tag = " 🪙"
-                elif _is_option:
-                    qty_display = str(int(raw_qty))
-                    tag = " 📜"
-                else:
-                    qty_display = str(int(raw_qty))
-                    tag = ""
+                # Format qty: fractional for crypto, int otherwise
+                qty_str = f"{raw_qty:.4f}" if _is_crypto else str(int(raw_qty))
                 rows.append({
-                    "Symbol":   p.symbol + tag,
-                    "Qty":      qty_display,
-                    "Entry":    f"${entry:.2f}",
-                    "Current":  f"${current:.2f}",
-                    "Cost":     f"${cost:,.0f}",
-                    "Deployed": f"{cost/equity*100:.1f}%" if equity > 0 else "-",
-                    "P&L $":    f"${unreal:+.2f}",
-                    "P&L %":    f"{unr_pct:+.2f}%",
+                    "Symbol": p.symbol,
+                    "Type": "🪙 Crypto" if _is_crypto else ("📊 Option" if _is_option else "📈 Stock"),
+                    "Qty": qty_str,
+                    "Entry": f"${entry:.2f}",
+                    "Current": f"${current:.2f}",
+                    "Cost": f"${cost:,.0f}",
+                    "Deployed %": f"{(cost / equity * 100) if equity else 0:.1f}%",
+                    "P&L $": f"${unreal:+,.2f}",
+                    "P&L %": f"{unr_pct:+.2f}%",
                 })
             df_pos = pd.DataFrame(rows)
 
+            # Color-style P&L columns
             def _color_pnl(val):
-                if isinstance(val, str):
-                    return "color: green" if (val.startswith("$+") or val.startswith("+")) else "color: red" if "-" in val else ""
-                if not isinstance(val, (int, float)):
+                try:
+                    v = float(str(val).replace("$", "").replace(",", "").replace("%", "").replace("+", ""))
+                    return "color: #28a745" if v > 0 else ("color: #dc3545" if v < 0 else "")
+                except Exception:
                     return ""
-                return "color: green" if val >= 0 else "color: red"
 
-            try:
-                styled = df_pos.style.map(_color_pnl, subset=["P&L $", "P&L %"])
-            except AttributeError:
-                styled = df_pos.style.applymap(_color_pnl, subset=["P&L $", "P&L %"])
-
-            st.dataframe(styled, use_container_width=True, hide_index=True)
-            st.caption(f"Total deployed: ${total_cost:,.0f} ({total_cost/equity*100:.1f}% of equity)" if equity > 0 else "")
+            styled = df_pos.style.map(_color_pnl, subset=["P&L $", "P&L %"])
+            st.dataframe(styled, width="stretch", hide_index=True)
+            st.caption(
+                f"Total deployed: **${total_cost:,.0f}** "
+                f"({(total_cost / equity * 100) if equity else 0:.1f}% of account)"
+            )
     except Exception as e:
-        st.error(f"Positions error: {e}")
+        st.error(f"Position fetch error: {e}")
 
 with right:
     st.subheader("Risk Status")
 
-    # Market status
-    st.markdown(f"**Market:** :{mcolor}[{mstatus}]")
-
-    # Circuit breaker (v7.31: scaled to tier max loss — warn at 50%, danger at 80%)
-    st.markdown("**Circuit breaker:**")
-    # Compute tier max loss first (used for thresholds + display)
-    def _dashboard_max_loss(eq):
-        _t = [
-            (0,     1500,    150),  (1500,  2500,   250),
-            (2500,  5000,    500),  (5000, 10000,  1000),
-            (10000, 25000,  2000),  (25000, 50000, 3500),
-            (50000, 75000,  5000),  (75000, 100000, 7500),
-        ]
-        for lo, hi, ml in _t:
-            if lo <= eq < hi:
-                return float(ml)
-        if eq >= 100000:
-            return max(10000.0, eq * 0.10)
-        return 150.0
-    _max_loss = _dashboard_max_loss(equity)
-    _danger   = -_max_loss * 0.80
-    _warn     = -_max_loss * 0.50
-    if daily_pl < _danger:
-        st.error(f"⛔ DANGER: ${daily_pl:+,.0f}")
-    elif daily_pl < _warn:
-        st.warning(f"⚠ Caution: ${daily_pl:+,.0f}")
+    # Market state
+    if mstatus == "OPEN":
+        st.success(f"📈 Market: **OPEN**")
     else:
-        st.success("🟢 OK")
+        st.warning(f"⏰ Market: {mstatus}")
 
-    st.markdown(f"**Daily goal:** ${DAILY_GOAL:,.0f} remaining")
-    st.markdown(f"**Max loss limit:** ${_max_loss:,.0f}")
+    # Circuit breaker (heuristic from health log)
+    if _health.get("status") in ("ERRORS", "STALE"):
+        st.error("Circuit breaker:\n\n🔴 **CHECK BOT**")
+    else:
+        st.success("Circuit breaker:\n\n🟢 **OK**")
 
-    st.divider()
-
-    # v7.3: Margin utilization bar (replaces PDT as primary risk gate)
-    st.markdown("**Margin Utilization**")
+    # Daily-goal remaining
     try:
-        # Pull from open positions we already have on the page
-        if 'positions' in dir() and positions:
-            total_notional = sum(
-                abs(float(p.qty)) * float(p.current_price if hasattr(p, 'current_price') else p.avg_entry_price)
-                for p in positions
-            )
-            util = total_notional / equity if equity > 0 else 0.0
-            pct = util * 100
-            if util >= 0.80:
-                st.error(f"⛔ {pct:.1f}% (cap 80%)")
-            elif util >= 0.70:
-                st.warning(f"⚠ {pct:.1f}% (warn 70%)")
-            else:
-                st.success(f"🟢 {pct:.1f}%")
-            st.progress(min(util, 1.0))
-        else:
-            st.caption("0.0% — no positions")
+        if DAILY_GOAL > 0:
+            remaining = max(0, DAILY_GOAL - daily_pl)
+            st.markdown(f"**Daily goal:** ${remaining:.0f} remaining")
     except Exception:
-        st.caption("unavailable")
+        pass
 
-    st.divider()
-
-    # v7.31: Capital Tier Progression panel
-    st.markdown("**Capital Tier**")
+    # Max-loss limit (mirrors tier_manager)
     try:
-        # Inline tier logic (dashboard is stateless; reproduce the minimum
-        # needed without importing the bot's src/ package)
-        _TIERS = [
-            (0,    1500,    "0 Seed",      0.040, 40,    200,    150),
-            (1500, 2500,    "1 Sprout",    0.035, 70,    350,    250),
-            (2500, 5000,    "2 Grow",      0.030, 110,   550,    500),
-            (5000, 10000,   "3 Establish", 0.025, 190,   950,    1000),
-            (10000, 25000,  "4 Build",     0.020, 350,   1750,   2000),
-            (25000, 50000,  "5 Scale",     0.0175,650,   3250,   3500),
-            (50000, 75000,  "6 Expand",    0.015, 940,   4700,   5000),
-            (75000, 100000, "7 Pro",       0.0125,1090,  5450,   7500),
-            (100000, None,  "8 Elite",     0.010, 1000,  5000,   10000),
-        ]
-        _eq = float(equity) if equity else 0.0
-        _tier = None
-        for lo, hi, name, rate, dly, wk, loss in _TIERS:
-            if _eq >= lo and (hi is None or _eq < hi):
-                _tier = (lo, hi, name, rate, dly, wk, loss)
-                break
-        if _tier is None:
-            _tier = _TIERS[0]
-        lo, hi, name, rate, dly, wk, loss = _tier
-        # For Elite: daily/weekly target scales with equity
-        if hi is None:
-            dly = max(dly, _eq * rate)
-            wk  = max(wk,  _eq * rate * 5)
-            loss = max(loss, _eq * 0.10)
-
-        st.markdown(f"**T{name}**")
-        st.caption(f"Daily rate: {rate*100:.2f}%")
-        c_a, c_b = st.columns(2)
-        with c_a:
-            st.caption(f"Daily target: ${dly:,.0f}")
-            st.caption(f"Max loss: ${loss:,.0f}")
-        with c_b:
-            st.caption(f"Weekly target: ${wk:,.0f}")
-            st.caption(f"Equity: ${_eq:,.0f}")
-
-        # Progress to next tier
-        if hi is not None:
-            progress = (_eq - lo) / (hi - lo) if (hi - lo) > 0 else 0.0
-            progress = max(0.0, min(1.0, progress))
-            remaining = max(0.0, hi - _eq)
-            next_name = _TIERS[min(_tier[0] // 1, len(_TIERS)-1)][2] if False else next(
-                (n[2] for n in _TIERS if n[0] >= hi), "Elite")
-            st.progress(progress)
-            st.caption(f"Progress to next tier ({next_name}): ${remaining:,.0f} remaining")
-        else:
-            st.progress(1.0)
-            st.caption("Top tier — scales with equity")
-    except Exception as _te:
-        st.caption(f"tier unavailable ({_te})")
-
-    st.divider()
-
-    # v7.3: PDT Mode indicator (replaces hardcoded 0/3 counter)
-    st.markdown("**PDT Mode**")
-    # Read from session trades for counter display
-    try:
-        sess_df = _fetch_session_trades()
-        if not sess_df.empty and "entry_time" in sess_df.columns and "exit_time" in sess_df.columns:
-            today_str = datetime.now().strftime("%Y-%m-%d")
-            same_day = sess_df[
-                sess_df["entry_time"].astype(str).str[:10] == sess_df.get("exit_time", sess_df["entry_time"]).astype(str).str[:10]
+        def _dashboard_max_loss(eq):
+            _t = [
+                (0, 1500, 150),     (1500, 2500, 250),
+                (2500, 5000, 500),  (5000, 10000, 1000),
+                (10000, 25000, 2000), (25000, 50000, 4000),
+                (50000, 75000, 5500), (75000, 100000, 7500),
             ]
-            pdt_count = len(same_day[same_day["entry_time"].astype(str).str[:10] == today_str])
-        else:
-            pdt_count = 0
+            for lo, hi, ml in _t:
+                if lo <= eq < hi:
+                    return float(ml)
+            return max(7500.0, eq * 0.075)
+        MAX_LOSS = _dashboard_max_loss(equity)
+        st.markdown(f"**Max loss limit:** ${MAX_LOSS:,.0f}")
     except Exception:
-        pdt_count = 0
+        pass
 
-    # Mode indicator — config values are embedded in bot, dashboard shows post-SEC
-    # elimination context so user knows the rule structure changed April 14, 2026
-    st.info(
-        "SEC eliminated PDT rule April 14, 2026. "
-        "Bot runs in toggleable mode (Full Gate / Warn-Only / Disabled) "
-        "controlled by PDT_ENABLED and PDT_WARN_ONLY in config.py."
-    )
-    st.caption(f"Today: {pdt_count} same-day round trips recorded")
-
-    # v7.0: Swing hold mode
-    st.markdown("**Exit Mode:**")
-    st.success("🔄 Swing Hold (default)")
-
-    # BTC Regime — reads btc_regime.txt pushed by bot to GitHub every scan
-    st.markdown("**BTC Regime**")
-    try:
-        _repo  = st.secrets.get("GITHUB_REPO", "speedracer1186/Trading-Bot-Dashboard")
-        _tok   = st.secrets.get("GITHUB_TOKEN", "")
-        _hdrs  = {"Authorization": f"token {_tok}"} if _tok else {}
-        _r     = requests.get(
-            f"https://raw.githubusercontent.com/{_repo}/main/btc_regime.txt",
-            headers=_hdrs, timeout=5)
-        if _r.status_code == 200 and _r.text.strip():
-            _rt = _r.text.strip()
-            _ts = _rt.split("|")[-1].strip() if "|" in _rt else ""
-            if "RANGING" in _rt:
-                st.info(f"📊 RANGING  {_ts}")
-            elif "TRENDING" in _rt:
-                st.success(f"📈 TRENDING  {_ts}")
-            else:
-                st.warning(f"➡ NEUTRAL  {_ts}")
-        else:
-            st.caption("BTC/USD: monitoring (no regime data yet)")
-    except Exception:
-        st.caption("Regime: checking...")
-
-    st.divider()
-
-    # v7.0: Ticker list (all 31)
-    st.markdown("**Tickers monitored**")
-    tickers = [
-        "PLTR","COIN","RBLX","SOFI","IONQ","HIMS","HOOD",
-        "TSLA","MSTR",
-        "GOOGL","AMZN","AMD","META","ORCL","APP","MSFT",
-        "NVDA","SMH","AVGO","MU","ARM","MRVL","SMCI",
-        "ARKK","TQQQ","SOXL",
-        "XLF","XLE",
-        "BTC/USD","IBIT"
-    ]
-    st.caption(", ".join(tickers))
-    st.caption("ETH/USD: suspended (v7.0)")
-
-    if is_paper:
-        st.info("📄 PAPER MODE")
-    else:
-        st.error("🔴 LIVE MODE")
-
-st.divider()
-
-# ── Intraday equity chart ─────────────────────────────────────────────────────
-st.subheader("Intraday Equity")
-# v7.36 fix #3: fall back to session-CSV-derived equity curve if Alpaca's
-# portfolio_history returns nothing (common in paper accounts after hours
-# or before any trades exist for the day). Pre-v7.36 the chart silently
-# went blank; now we try Alpaca first, then approximate from session CSV.
-_eq_chart_rendered = False
-try:
-    from alpaca.trading.requests import GetPortfolioHistoryRequest
-    hist = client.get_portfolio_history(
-        GetPortfolioHistoryRequest(period="1D", timeframe="1Min")
-    )
-    if hist and hist.equity:
-        timestamps = [datetime.fromtimestamp(t) for t in hist.timestamp]
-        equities   = hist.equity
-        df_eq = pd.DataFrame({"Time": timestamps, "Equity": equities})
-        df_eq = df_eq[df_eq["Equity"] > 0]
-        if not df_eq.empty:
-            st.line_chart(df_eq.set_index("Time")["Equity"])
-            _eq_chart_rendered = True
-except Exception as e:
-    st.caption(f"Alpaca portfolio history unavailable ({e}); trying CSV fallback.")
-
-if not _eq_chart_rendered:
-    # v7.36: Approximate equity curve from session CSV — start at
-    # session_start_equity, apply each trade's net_pnl (or pnl if net
-    # not available) cumulatively at closed_time. Not exact since we
-    # don't have intra-trade marks, but better than blank chart.
-    try:
-        df_t = _fetch_session_trades()
-        if not df_t.empty and "closed_time" in df_t.columns:
-            _pnl_col = "net_pnl" if "net_pnl" in df_t.columns else "pnl"
-            df_eq2 = df_t.copy()
-            df_eq2["closed_time"] = pd.to_datetime(df_eq2["closed_time"])
-            df_eq2 = df_eq2.sort_values("closed_time")
-            # Use Alpaca-current equity minus today's net change as start
-            try:
-                _last_eq = float(client.get_account().last_equity)
-            except Exception:
-                _last_eq = float(getattr(client.get_account(), "equity", 0))
-            df_eq2["cumulative_pnl"] = df_eq2[_pnl_col].cumsum()
-            df_eq2["Equity"] = _last_eq + df_eq2["cumulative_pnl"]
-            df_eq2 = df_eq2[["closed_time", "Equity"]].rename(
-                columns={"closed_time": "Time"}
-            )
-            if not df_eq2.empty:
-                st.caption(
-                    "📊 Showing approximated curve from session CSV "
-                    f"(using `{_pnl_col}`, marked at trade close times)."
-                )
-                st.line_chart(df_eq2.set_index("Time")["Equity"])
-                _eq_chart_rendered = True
-    except Exception as e:
-        st.caption(f"CSV fallback also failed: {e}")
-
-if not _eq_chart_rendered:
-    st.caption("No equity data available — Alpaca history empty and no closed trades yet today.")
-
-st.divider()
-
-# ── Session trade log ─────────────────────────────────────────────────────────
-st.subheader("Today's Session Trades")
-try:
-    df_trades = _fetch_session_trades()
-    if df_trades.empty:
-        st.info("No trade log pushed yet. Run tools/run_push_results.bat after session.")
-    else:
-        # Summary metrics — v7.36: net P&L after fees when columns present
-        has_pnl     = "pnl" in df_trades.columns
-        has_net_pnl = "net_pnl" in df_trades.columns
-        has_fees    = "fees_total_usd" in df_trades.columns
-        has_strat   = "strategy" in df_trades.columns
-
-        total_t   = len(df_trades)
-        wins      = int((df_trades["pnl"] > 0).sum()) if has_pnl else 0
-        total_pnl = float(df_trades["pnl"].sum())     if has_pnl else 0.0
-        wr        = wins / total_t * 100 if total_t > 0 else 0
-        total_fees = float(df_trades["fees_total_usd"].sum()) if has_fees else 0.0
-        total_net  = float(df_trades["net_pnl"].sum()) if has_net_pnl else total_pnl
-
-        # Show 5 metrics when v7.36 columns present, 4 otherwise
-        if has_net_pnl and has_fees:
-            m1, m2, m3, m4, m5 = st.columns(5)
-            m1.metric("Trades",   total_t)
-            m2.metric("Wins",     wins)
-            m3.metric("Win Rate", f"{wr:.1f}%")
-            m4.metric("Gross P&L", f"${total_pnl:+,.2f}")
-            m5.metric(
-                "Net P&L (after fees)",
-                f"${total_net:+,.2f}",
-                delta=f"-${total_fees:.2f} fees" if total_fees > 0 else None,
-                delta_color="inverse" if total_fees > 0 else "off",
-            )
-        else:
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Trades",   total_t)
-            m2.metric("Wins",     wins)
-            m3.metric("Win Rate", f"{wr:.1f}%")
-            m4.metric("P&L",      f"${total_pnl:+,.2f}")
-
-        # v7.36: strategy breakdown (scalp vs hybrid vs shares/options)
-        if has_strat and has_pnl:
-            try:
-                by_strat = df_trades.groupby("strategy").agg(
-                    trades=("pnl", "count"),
-                    gross=("pnl", "sum"),
-                ).reset_index()
-                if not by_strat.empty and len(by_strat) > 1:
-                    st.caption("Strategy breakdown:")
-                    _rows = []
-                    for _, row in by_strat.iterrows():
-                        _name = str(row["strategy"]) or "(unspecified)"
-                        _rows.append(
-                            f"**{_name}**: {int(row['trades'])} trades, "
-                            f"gross ${float(row['gross']):+,.2f}"
-                        )
-                    st.markdown("  ·  ".join(_rows))
-            except Exception:
-                pass
-
-        # v7.0: exit reason breakdown
-        if "exit_reason" in df_trades.columns:
-            er_counts = df_trades["exit_reason"].value_counts()
-            reason_str = "  |  ".join(
-                f"{r}: {c}" for r, c in er_counts.items()
-            )
-            st.caption(f"Exits — {reason_str}")
-
-        # v7.0: highlight high-conviction trades (score >= 60)
-        if "score" in df_trades.columns:
-            high_conv = df_trades[df_trades["score"] >= 60]
-            if not high_conv.empty:
-                st.success(f"⭐ {len(high_conv)} high-conviction trade(s) today (score ≥ 60)")
-
-        # Display table — v7.0 + v7.36 columns
-        disp_cols = [c for c in [
-            "symbol", "direction", "entry_time", "entry_price",
-            "exit_price", "exit_reason", "pnl", "pnl_pct",
-            "strategy", "entry_order_type",        # v7.36
-            "fees_total_usd", "net_pnl", "net_pnl_pct",  # v7.36
-            "score", "tfs_agreed"
-        ] if c in df_trades.columns]
-
-        if has_pnl:
-            def _color_pnl(val):
-                if isinstance(val, str):
-                    return "color: green" if (val.startswith("$+") or val.startswith("+")) else "color: red" if "-" in val else ""
-                if not isinstance(val, (int, float)):
-                    return ""
-                return "color: green" if val >= 0 else "color: red"
-            pnl_cols = [c for c in [
-                "pnl", "pnl_pct", "net_pnl", "net_pnl_pct"
-            ] if c in df_trades.columns]
-            try:
-                styled_trades = df_trades[disp_cols].style.map(_color_pnl, subset=pnl_cols)
-            except AttributeError:
-                styled_trades = df_trades[disp_cols].style.applymap(_color_pnl, subset=pnl_cols)
-            st.dataframe(styled_trades, use_container_width=True, hide_index=True)
-        else:
-            st.dataframe(df_trades[disp_cols], use_container_width=True, hide_index=True)
-
-except Exception as e:
-    st.error(f"Trade log error: {e}")
-
-st.divider()
-
-# ═══════════════════════════════════════════════════════════════════════════
-#  v7.36 fix #6 — Dedicated CRYPTO panel (regime, scalper status, recent BTC)
-# ═══════════════════════════════════════════════════════════════════════════
-
-st.subheader("🪙 Crypto (BTC/USD)")
-_ccol1, _ccol2, _ccol3 = st.columns(3)
-
-# Regime status
-_regime = _read_btc_regime()
-with _ccol1:
-    st.markdown("**Current BTC Regime**")
-    if _regime == "unknown":
-        st.caption("Regime file not accessible (remote dashboard)")
-    else:
-        # btc_regime.txt format (v7.36.1+): single word "RANGING"/"TRENDING"/"NEUTRAL".
-        # Pre-v7.36.1 files had " | HH:MM ET" suffix which is stripped on display.
+    # BTC regime
+    _regime = _read_btc_regime()
+    if _regime != "unknown":
         _regime_display = _regime.split(" | ", 1)[0].strip() if " | " in _regime else _regime
-        st.markdown(f"`{_regime_display}`")
-
-# Scalper status (best-effort: read from latest bot init log line)
-with _ccol2:
-    st.markdown("**Scalper Status**")
-    _scalper_status = "unknown"
-    if _health.get("available"):
-        try:
-            import os, re
-            here = os.path.dirname(os.path.abspath(__file__))
-            log_path = os.path.join(here, "..", "trading_bot.log")
-            if os.path.exists(log_path):
-                with open(log_path, "rb") as f:
-                    try:
-                        f.seek(-50_000, os.SEEK_END)
-                    except OSError:
-                        f.seek(0)
-                    tail = f.read().decode("utf-8", errors="ignore")
-                if "v7.36 crypto scalper ENABLED" in tail:
-                    _scalper_status = "✅ ENABLED"
-                elif "v7.36 crypto scalper DISABLED" in tail:
-                    _scalper_status = "⏸️ DISABLED"
-        except Exception:
-            pass
-    st.markdown(f"`{_scalper_status}`")
-
-# Today's BTC trades summary
-with _ccol3:
-    st.markdown("**Today's BTC Trades**")
-    try:
-        df_today = _fetch_session_trades()
-        if not df_today.empty and "symbol" in df_today.columns:
-            df_btc = df_today[df_today["symbol"].str.contains(
-                "BTC", na=False, regex=False
-            )]
-            if df_btc.empty:
-                st.caption("No BTC trades today.")
-            else:
-                _scalp_count = 0
-                _hybrid_count = 0
-                if "strategy" in df_btc.columns:
-                    _scalp_count  = int((df_btc["strategy"] == "scalp").sum())
-                    _hybrid_count = int((df_btc["strategy"] == "hybrid").sum())
-                _btc_pnl_col = "net_pnl" if "net_pnl" in df_btc.columns else "pnl"
-                _btc_pnl = float(df_btc[_btc_pnl_col].sum())
-                st.markdown(
-                    f"Trades: {len(df_btc)} "
-                    f"(scalp: {_scalp_count}, hybrid: {_hybrid_count})  \n"
-                    f"P&L: ${_btc_pnl:+,.2f}"
-                )
-        else:
-            st.caption("No trade data for today.")
-    except Exception:
-        st.caption("BTC summary unavailable.")
+        _regime_emoji = {"RANGING": "↔️", "TRENDING": "📈", "NEUTRAL": "⚖️"}.get(
+            _regime_display.upper(), "❓")
+        st.markdown(f"**BTC regime:** {_regime_emoji} `{_regime_display}`")
 
 st.divider()
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  v7.36 fix #4 — Multi-day comparison view
-# ═══════════════════════════════════════════════════════════════════════════
 
-st.subheader("📅 Last 7 Days")
+# ── Recent session trades ─────────────────────────────────────────────────────
+st.subheader("📋 Recent Trades")
+st.caption("Last 30 trade entries from the last 7 days, newest first.")
+
 try:
-    df_recent = _fetch_recent_session_trades(days=7)
-    if df_recent.empty:
-        st.info("No multi-day session data yet (need at least one closed session).")
-    else:
-        # Per-day summary
-        if "session_date" in df_recent.columns and "pnl" in df_recent.columns:
-            _net_col = "net_pnl" if "net_pnl" in df_recent.columns else "pnl"
-            agg = df_recent.groupby("session_date").agg(
-                trades=("pnl", "count"),
-                wins=("pnl", lambda s: int((s > 0).sum())),
-                gross_pnl=("pnl", "sum"),
-                net_pnl=(_net_col, "sum"),
-            ).reset_index()
-            agg["win_rate"] = (
-                agg["wins"] / agg["trades"] * 100
-            ).round(1).astype(str) + "%"
-            agg["gross_pnl"] = agg["gross_pnl"].apply(lambda v: f"${v:+,.2f}")
-            agg["net_pnl"]   = agg["net_pnl"].apply(lambda v: f"${v:+,.2f}")
-            # Pretty date display
-            try:
-                agg["date"] = pd.to_datetime(
-                    agg["session_date"], format="%Y%m%d"
-                ).dt.strftime("%a %m/%d")
-            except Exception:
-                agg["date"] = agg["session_date"]
-            agg = agg[["date", "trades", "wins", "win_rate",
-                       "gross_pnl", "net_pnl"]]
-            st.dataframe(agg, use_container_width=True, hide_index=True)
+    if not df_recent_trades.empty:
+        # Show most useful columns
+        show_cols = [c for c in (
+            "session_date", "symbol", "direction", "qty",
+            "entry_price", "exit_price", "pnl", "pnl_pct", "exit_reason"
+        ) if c in df_recent_trades.columns]
+        if show_cols:
+            df_show = df_recent_trades[show_cols].copy()
+            # Reverse so newest is first
+            df_show = df_show.iloc[::-1].head(30)
 
-            # Cumulative net P&L line chart
-            try:
-                df_chart = df_recent.copy()
-                df_chart["session_date"] = pd.to_datetime(
-                    df_chart["session_date"], format="%Y%m%d"
-                )
-                _net_col2 = "net_pnl" if "net_pnl" in df_chart.columns else "pnl"
-                daily_pnl = df_chart.groupby("session_date")[_net_col2].sum()
-                cum_pnl = daily_pnl.cumsum()
-                if not cum_pnl.empty:
-                    st.caption("📈 Cumulative net P&L over the last 7 days:")
-                    st.line_chart(cum_pnl)
-            except Exception:
-                pass
-
-            # Strategy breakdown across the week
-            if "strategy" in df_recent.columns:
+            def _color_pnl_val(val):
                 try:
-                    by_strat = df_recent.groupby("strategy").agg(
-                        trades=("pnl", "count"),
-                        net_pnl=(_net_col, "sum"),
-                    ).reset_index()
-                    if len(by_strat) > 1:
-                        st.caption("**Weekly strategy breakdown:**")
-                        _bits = []
-                        for _, row in by_strat.iterrows():
-                            _name = str(row["strategy"]) or "(unspecified)"
-                            _bits.append(
-                                f"**{_name}**: {int(row['trades'])} trades, "
-                                f"net ${float(row['net_pnl']):+,.2f}"
-                            )
-                        st.markdown("  ·  ".join(_bits))
+                    v = float(val)
+                    return "color: #28a745" if v > 0 else ("color: #dc3545" if v < 0 else "")
                 except Exception:
-                    pass
+                    return ""
+
+            pnl_cols = [c for c in ("pnl", "pnl_pct") if c in df_show.columns]
+            styled_show = df_show.style.map(_color_pnl_val, subset=pnl_cols) if pnl_cols else df_show
+            st.dataframe(styled_show, width="stretch", hide_index=True)
         else:
-            st.dataframe(df_recent.tail(30), use_container_width=True, hide_index=True)
+            st.dataframe(df_recent_trades.head(30), width="stretch", hide_index=True)
+    else:
+        st.info("No trades yet — bot will start populating this once it trades.")
 except Exception as e:
-    st.caption(f"Multi-day view error: {e}")
+    st.caption(f"Recent trades error: {e}")
 
 st.divider()
+
+
+# ── Footer ───────────────────────────────────────────────────────────────────
 st.caption(
-    f"Trading Bot v7.36 | {'Paper' if is_paper else 'LIVE'} | "
-    f"speedracer1186 | {datetime.now().strftime('%Y-%m-%d')}"
+    f"Trading Bot {_VERSION}  |  "
+    f"{'Paper trading' if is_paper else 'LIVE TRADING'}  |  "
+    f"speedracer1186  |  "
+    f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
 )
