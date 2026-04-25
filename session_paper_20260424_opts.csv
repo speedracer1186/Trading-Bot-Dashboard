@@ -1,0 +1,1 @@
+symbol,direction,entry_time,entry_price,exit_time,exit_price,exit_reason,qty,pnl,pnl_pct,score,tfs_agreed,reasoning,contract_symbol,strike,option_type,dte_entry,iv_rank,hv_entry,regime,regime_multiplier,dd_at_entry,cluster,gate_tags
