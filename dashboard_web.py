@@ -355,9 +355,21 @@ except ImportError:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+#  v7.36.4 (rev2): Dashboard version is now a self-contained constant
+#  rather than reading from ../src/version.py. The dashboard runs on
+#  Streamlit Cloud where there's no src/version.py — only dashboard_web.py
+#  itself is deployed. Pre-fix, _resolve_version() always failed the file
+#  lookup on Streamlit and fell back to a stale hardcoded value.
+#  This constant must be updated alongside src/version.py at every release.
+#  When running locally (with src/ accessible), _resolve_version() prefers
+#  the source-of-truth file; the constant is only the fallback.
+_DASHBOARD_VERSION_FALLBACK = "v7.36.4"
+
+
 def _resolve_version() -> str:
-    """Pull version dynamically from src/version.py so dashboard
-    never goes stale relative to the bot it monitors."""
+    """Resolve version. Prefers src/version.py when accessible (local
+    install), falls back to the hardcoded constant above (Streamlit
+    Cloud deployment, where src/ doesn't exist)."""
     import os, re
     try:
         here = os.path.dirname(os.path.abspath(__file__))
@@ -370,7 +382,7 @@ def _resolve_version() -> str:
                 return m.group(1)
     except Exception:
         pass
-    return "v7.36.3"
+    return _DASHBOARD_VERSION_FALLBACK
 
 
 def _compute_performance_metrics(trades_df: pd.DataFrame) -> dict:
