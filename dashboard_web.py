@@ -363,7 +363,7 @@ except ImportError:
 #  This constant must be updated alongside src/version.py at every release.
 #  When running locally (with src/ accessible), _resolve_version() prefers
 #  the source-of-truth file; the constant is only the fallback.
-_DASHBOARD_VERSION_FALLBACK = "v7.36.4"
+_DASHBOARD_VERSION_FALLBACK = "v7.36.5"
 
 
 def _resolve_version() -> str:
