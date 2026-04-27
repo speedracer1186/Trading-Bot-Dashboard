@@ -3,3 +3,6 @@ closed_time,symbol,direction,qty,entry_price,exit_price,pnl,pnl_pct,entry_time,e
 2026-04-27T17:06:17.623678,BTCUSD,buy,0,77530.8131,76793.22,-1.42,-0.95,,holding,0,0,paper
 2026-04-27T17:06:17.623711,SMCI260508C00029000,buy,1,2.41,1.6,-81.0,-33.61,,holding,0,0,paper
 2026-04-27T17:06:17.623727,VXX,buy,5,29.58,28.74,-4.2,-2.84,,holding,0,0,paper
+2026-04-27T18:51:02.614512,BTCUSD,buy,0,77445.2308,77355.4,-0.26,-0.12,,holding,0,0,paper
+2026-04-27T18:51:02.614541,SMCI260508C00029000,buy,1,2.41,1.6,-81.0,-33.61,,holding,0,0,paper
+2026-04-27T18:51:02.614555,VXX,buy,5,29.58,28.74,-4.2,-2.84,,holding,0,0,paper
