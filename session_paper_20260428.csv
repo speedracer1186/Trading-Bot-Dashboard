@@ -1,0 +1,5 @@
+closed_time,symbol,direction,qty,entry_price,exit_price,pnl,pnl_pct,entry_time,exit_reason,score,tfs_agreed,mode,strategy,entry_order_type,entry_fee_usd,exit_fee_usd,fees_total_usd,net_pnl,net_pnl_pct
+2026-04-28T14:30:00.647384,VXX,?,0,0.0,0.0,0.0,0.0,,eod_close,0,0,paper,,,0.0,0.0,0.0,0.0,0.0
+2026-04-28T18:50:51.685424,BTCUSD,buy,0,77443.6203,76354.3,-3.11,-1.41,,holding,0,0,paper
+2026-04-28T18:50:51.685452,GME.WS,buy,12,3.78,3.6052,-2.1,-4.62,,holding,0,0,paper
+2026-04-28T18:50:51.685464,SMCI260508C00029000,buy,1,2.41,1.15,-126.0,-52.28,,holding,0,0,paper
