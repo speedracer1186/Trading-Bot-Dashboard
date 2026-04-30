@@ -1,0 +1,4 @@
+closed_time,symbol,direction,qty,entry_price,exit_price,pnl,pnl_pct,entry_time,exit_reason,score,tfs_agreed,mode
+2026-04-29T20:23:44.254067,BTCUSD,buy,0,77443.6203,76238.9,-3.44,-1.56,,holding,0,0,paper
+2026-04-29T20:23:44.254091,GME.WS,buy,12,3.78,3.65,-1.56,-3.44,,holding,0,0,paper
+2026-04-29T20:23:44.254103,SMCI260508C00029000,buy,1,2.41,0.86,-155.0,-64.31,,holding,0,0,paper
