@@ -1,5 +1,5 @@
 """
-dashboard_web.py — Trading Bot v7.36 Web Dashboard
+dashboard_web.py — Trading Bot Web Dashboard (version-agnostic)
 ===================================================
 Password-gated Streamlit dashboard for paper + live trading monitoring.
 
@@ -363,7 +363,7 @@ except ImportError:
 #  This constant must be updated alongside src/version.py at every release.
 #  When running locally (with src/ accessible), _resolve_version() prefers
 #  the source-of-truth file; the constant is only the fallback.
-_DASHBOARD_VERSION_FALLBACK = "v7.36.7"
+_DASHBOARD_VERSION_FALLBACK = "v7.38.1"
 
 
 def _resolve_version() -> str:
