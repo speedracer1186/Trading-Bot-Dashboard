@@ -1,2 +1,0 @@
-closed_time,symbol,direction,qty,entry_price,exit_price,pnl,pnl_pct,entry_time,exit_reason,score,tfs_agreed,mode,strategy,entry_order_type,entry_fee_usd,exit_fee_usd,fees_total_usd,net_pnl,net_pnl_pct
-2026-04-30T10:34:27.743925,MRVL,buy,1,159.905,0.0,0.0,0.0,2026-04-30T10:33:14.794435,stop_or_tp,35,0,paper,mtf_primary,limit,0.0,0.0,0.0,0.0,0.0
