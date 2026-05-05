@@ -29,6 +29,42 @@ import pandas as pd
 import requests
 import streamlit as st
 
+
+# rev15: Layout-aware install-root resolver. dashboard_web.py runs
+# in TWO contexts:
+#   1. Streamlit Cloud — runs from a flat dashboard repo. Local
+#      file paths don't exist; the GitHub API path is used instead.
+#   2. Locally alongside the bot — under either Option A
+#      (_internal/tools/dashboard_web.py) or legacy (tools/...).
+#
+# We resolve install_root once and cache it, so the local-fallback
+# paths point to the right place regardless of layout.
+def _resolve_local_install_root():
+    """Return the install root for local-fallback paths, or None
+    if running outside any recognizable layout (e.g. Streamlit
+    Cloud where paths.py won't exist alongside this file)."""
+    import os as _os, sys as _sys
+    here = _os.path.dirname(_os.path.abspath(__file__))
+    # First try paths.py from sibling src/ (rev15 layout has
+    # _internal/tools/dashboard_web.py — sibling is _internal/src/)
+    try:
+        _src = _os.path.join(_os.path.dirname(here), "src")
+        if _os.path.isdir(_src):
+            if _src not in _sys.path:
+                _sys.path.insert(0, _src)
+            from paths import INSTALL_ROOT
+            return INSTALL_ROOT
+    except Exception:
+        pass
+    # Legacy fallback: parent of tools/ is the install root
+    legacy_root = _os.path.dirname(here)
+    if _os.path.isdir(_os.path.join(legacy_root, "src")):
+        return legacy_root
+    return None
+
+
+_LOCAL_INSTALL_ROOT = _resolve_local_install_root()
+
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Trading Bot Dashboard",
@@ -175,11 +211,11 @@ def _fetch_session_trades() -> pd.DataFrame:
 
     # ── Fallback: local file (works when dashboard runs alongside bot) ──
     try:
-        here = os.path.dirname(os.path.abspath(__file__))
-        # tools/ → ../results/
-        local = os.path.join(here, "..", "results", f"session_paper_{today}.csv")
-        if os.path.exists(local):
-            return pd.read_csv(local)
+        if _LOCAL_INSTALL_ROOT:
+            local = os.path.join(_LOCAL_INSTALL_ROOT, "results",
+                                  f"session_paper_{today}.csv")
+            if os.path.exists(local):
+                return pd.read_csv(local)
     except Exception:
         pass
 
@@ -227,22 +263,22 @@ def _fetch_recent_session_trades(days: int = 7) -> pd.DataFrame:
     # Fallback: local results/ directory
     if not out:
         try:
-            here = os.path.dirname(os.path.abspath(__file__))
-            results_dir = os.path.join(here, "..", "results")
-            if os.path.isdir(results_dir):
-                files = sorted([
-                    f for f in os.listdir(results_dir)
-                    if f.startswith("session_paper_") and f.endswith(".csv")
-                ])
-                for fname in files[-days:]:
-                    try:
-                        date_str = fname.replace("session_paper_", "")[:8]
-                        df = pd.read_csv(os.path.join(results_dir, fname))
-                        if not df.empty:
-                            df["session_date"] = date_str
-                            out.append(df)
-                    except Exception:
-                        continue
+            if _LOCAL_INSTALL_ROOT:
+                results_dir = os.path.join(_LOCAL_INSTALL_ROOT, "results")
+                if os.path.isdir(results_dir):
+                    files = sorted([
+                        f for f in os.listdir(results_dir)
+                        if f.startswith("session_paper_") and f.endswith(".csv")
+                    ])
+                    for fname in files[-days:]:
+                        try:
+                            date_str = fname.replace("session_paper_", "")[:8]
+                            df = pd.read_csv(os.path.join(results_dir, fname))
+                            if not df.empty:
+                                df["session_date"] = date_str
+                                out.append(df)
+                        except Exception:
+                            continue
         except Exception:
             pass
 
@@ -261,8 +297,12 @@ def _bot_health_check() -> dict:
            "last_log_ts": None, "warnings_last_hour": 0,
            "scans_last_hour": 0}
     try:
-        here = os.path.dirname(os.path.abspath(__file__))
-        log_path = os.path.join(here, "..", "trading_bot.log")
+        if not _LOCAL_INSTALL_ROOT:
+            return out
+        log_path = os.path.join(_LOCAL_INSTALL_ROOT, "logs", "trading_bot.log")
+        # Some installs may have the log at the root (legacy)
+        if not os.path.exists(log_path):
+            log_path = os.path.join(_LOCAL_INSTALL_ROOT, "trading_bot.log")
         if not os.path.exists(log_path):
             return out
         out["available"] = True
@@ -323,11 +363,11 @@ def _read_btc_regime() -> str:
     not readable."""
     import os
     try:
-        here = os.path.dirname(os.path.abspath(__file__))
-        path = os.path.join(here, "..", "data", "btc_regime.txt")
-        if os.path.exists(path):
-            with open(path, "r") as f:
-                return f.read().strip()
+        if _LOCAL_INSTALL_ROOT:
+            path = os.path.join(_LOCAL_INSTALL_ROOT, "data", "btc_regime.txt")
+            if os.path.exists(path):
+                with open(path, "r") as f:
+                    return f.read().strip()
     except Exception:
         pass
     return "unknown"
