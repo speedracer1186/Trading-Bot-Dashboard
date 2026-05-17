@@ -1,5 +1,5 @@
 """
-dashboard_web.py — Trading Bot Web Dashboard (version-agnostic)
+dashboard_web.py -- Trading Bot Web Dashboard (version-agnostic)
 ===================================================
 Password-gated Streamlit dashboard for paper + live trading monitoring.
 
@@ -13,8 +13,8 @@ v7.0 changes:
   - Swing hold mode indicator
   - Score 60+ high conviction trade highlights
 
-Deployment: Streamlit Cloud (free tier) — share.streamlit.io
-Required secrets (App settings → Secrets):
+Deployment: Streamlit Cloud (free tier) -- share.streamlit.io
+Required secrets (App settings -> Secrets):
     DASHBOARD_PASSWORD = "your-chosen-password"
     ALPACA_API_KEY     = "your-alpaca-paper-api-key"
     ALPACA_SECRET_KEY  = "your-alpaca-paper-secret-key"
@@ -32,9 +32,9 @@ import streamlit as st
 
 # rev15: Layout-aware install-root resolver. dashboard_web.py runs
 # in TWO contexts:
-#   1. Streamlit Cloud — runs from a flat dashboard repo. Local
+#   1. Streamlit Cloud -- runs from a flat dashboard repo. Local
 #      file paths don't exist; the GitHub API path is used instead.
-#   2. Locally alongside the bot — under either Option A
+#   2. Locally alongside the bot -- under either Option A
 #      (_internal/tools/dashboard_web.py) or legacy (tools/...).
 #
 # We resolve install_root once and cache it, so the local-fallback
@@ -46,7 +46,7 @@ def _resolve_local_install_root():
     import os as _os, sys as _sys
     here = _os.path.dirname(_os.path.abspath(__file__))
     # First try paths.py from sibling src/ (rev15 layout has
-    # _internal/tools/dashboard_web.py — sibling is _internal/src/)
+    # _internal/tools/dashboard_web.py -- sibling is _internal/src/)
     try:
         _src = _os.path.join(_os.path.dirname(here), "src")
         if _os.path.isdir(_src):
@@ -65,15 +65,15 @@ def _resolve_local_install_root():
 
 _LOCAL_INSTALL_ROOT = _resolve_local_install_root()
 
-# ── Page config ───────────────────────────────────────────────────────────────
+# -- Page config ---------------------------------------------------------------
 st.set_page_config(
     page_title="Trading Bot Dashboard",
-    page_icon="📈",
+    page_icon="[chart-up]",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
 
-# ── Password gate ─────────────────────────────────────────────────────────────
+# -- Password gate -------------------------------------------------------------
 def _check_password() -> bool:
     """v7.36 fix #2: refuse to load if DASHBOARD_PASSWORD is unset.
     Pre-v7.36 the gate defaulted to "changeme" silently, exposing
@@ -86,16 +86,16 @@ def _check_password() -> bool:
 
     if not correct or correct == "changeme":
         st.error(
-            "🔒 **DASHBOARD_PASSWORD secret is not set** "
+            "[locked] **DASHBOARD_PASSWORD secret is not set** "
             "(or is the insecure default 'changeme'). "
             "This dashboard refuses to load until a real password is "
             "configured."
         )
         st.info(
-            "**To fix:** Go to share.streamlit.io → your app → "
-            "⋮ Settings → Secrets and add a line like:  \n"
+            "**To fix:** Go to share.streamlit.io -> your app -> "
+            "... Settings -> Secrets and add a line like:  \n"
             "```\nDASHBOARD_PASSWORD = \"your-strong-password-here\"\n```\n"
-            "Then click **Reboot app** from the ⋮ menu."
+            "Then click **Reboot app** from the ... menu."
         )
         return False
 
@@ -109,7 +109,7 @@ def _check_password() -> bool:
     if st.session_state.get("auth"):
         return True
 
-    st.markdown("## 📈 Trading Bot Dashboard")
+    st.markdown("## [chart-up] Trading Bot Dashboard")
     st.text_input("Password", type="password", key="pw", on_change=_submit)
     if st.session_state.get("pw_wrong"):
         st.error("Incorrect password.")
@@ -118,7 +118,7 @@ def _check_password() -> bool:
 if not _check_password():
     st.stop()
 
-# ── Alpaca client ─────────────────────────────────────────────────────────────
+# -- Alpaca client -------------------------------------------------------------
 @st.cache_resource
 def _get_client():
     from alpaca.trading.client import TradingClient
@@ -130,7 +130,7 @@ def _get_client():
             f"API keys missing from Streamlit secrets. "
             f"ALPACA_API_KEY={'SET' if ak else 'MISSING'}, "
             f"ALPACA_SECRET_KEY={'SET' if sk else 'MISSING'}. "
-            f"Go to share.streamlit.io → your app → Settings → Secrets and add them."
+            f"Go to share.streamlit.io -> your app -> Settings -> Secrets and add them."
         )
     return TradingClient(api_key=ak, secret_key=sk, paper=pap), pap
 
@@ -139,18 +139,18 @@ try:
 except Exception as e:
     st.error(f"Alpaca connection failed: {e}")
     st.info(
-        "**To fix:** Go to share.streamlit.io → your app → ⋮ Settings → Secrets  \n"
+        "**To fix:** Go to share.streamlit.io -> your app -> ... Settings -> Secrets  \n"
         "Make sure these keys exist with no extra quotes:  \n"
         "```\n"
         "ALPACA_API_KEY = \"PKxxxxxxxxx\"\n"
         "ALPACA_SECRET_KEY = \"xxxxxxxxxx\"\n"
         "ALPACA_PAPER = \"true\"\n"
         "```\n"
-        "Then click **Reboot app** from the ⋮ menu."
+        "Then click **Reboot app** from the ... menu."
     )
     st.stop()
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# -- Helpers -------------------------------------------------------------------
 def _market_status() -> str:
     try:
         clock = client.get_clock()
@@ -161,14 +161,14 @@ def _market_status() -> str:
         diff = next_open - now
         hours = int(diff.total_seconds() // 3600)
         mins  = int((diff.total_seconds() % 3600) // 60)
-        return f"CLOSED — opens in {hours}h {mins}m"
+        return f"CLOSED -- opens in {hours}h {mins}m"
     except Exception:
         return "MARKET STATUS UNKNOWN"
 
 def _fetch_session_trades() -> pd.DataFrame:
     """Fetch today's session trade CSV.
 
-    v7.36 fix #1: retry GitHub fetch (8s timeout × 3 attempts with
+    v7.36 fix #1: retry GitHub fetch (8s timeout x 3 attempts with
     exponential backoff: 1s, 2s, 4s), then fall back to local file
     if dashboard is running on the same machine as the bot.
     Pre-v7.36 a single GitHub timeout meant blank dashboard.
@@ -177,7 +177,7 @@ def _fetch_session_trades() -> pd.DataFrame:
 
     today = datetime.now().strftime("%Y%m%d")
 
-    # ── Attempt 1-3: GitHub API with backoff ───────────────────────
+    # -- Attempt 1-3: GitHub API with backoff -----------------------
     try:
         token = st.secrets.get("GITHUB_TOKEN", "")
         repo  = st.secrets.get("GITHUB_REPO",  "speedracer1186/Trading-Bot-Dashboard")
@@ -200,7 +200,7 @@ def _fetch_session_trades() -> pd.DataFrame:
                         dl_url = f"https://raw.githubusercontent.com/{repo}/main/{fname}"
                         df = pd.read_csv(dl_url)
                         return df
-                    # No file for today on GitHub yet — fall through to local
+                    # No file for today on GitHub yet -- fall through to local
                     break
                 last_err = f"HTTP {resp.status_code}"
             except Exception as e:
@@ -209,7 +209,7 @@ def _fetch_session_trades() -> pd.DataFrame:
     except Exception:
         pass
 
-    # ── Fallback: local file (works when dashboard runs alongside bot) ──
+    # -- Fallback: local file (works when dashboard runs alongside bot) --
     try:
         if _LOCAL_INSTALL_ROOT:
             local = os.path.join(_LOCAL_INSTALL_ROOT, "results",
@@ -221,7 +221,7 @@ def _fetch_session_trades() -> pd.DataFrame:
 
     return pd.DataFrame()
 
-# ── Auto-refresh (preserves login session state) ─────────────────────────────
+# -- Auto-refresh (preserves login session state) -----------------------------
 
 
 def _fetch_recent_session_trades(days: int = 7) -> pd.DataFrame:
@@ -233,7 +233,7 @@ def _fetch_recent_session_trades(days: int = 7) -> pd.DataFrame:
     out = []
     today = datetime.now().date()
 
-    # Try GitHub first (preferred — works for remote dashboard)
+    # Try GitHub first (preferred -- works for remote dashboard)
     try:
         token = st.secrets.get("GITHUB_TOKEN", "")
         repo  = st.secrets.get("GITHUB_REPO",  "speedracer1186/Trading-Bot-Dashboard")
@@ -373,31 +373,31 @@ def _read_btc_regime() -> str:
     return "unknown"
 
 
-# ── Auto-refresh (preserves login session state) ─────────────────────────────
+# -- Auto-refresh (preserves login session state) -----------------------------
 # Uses streamlit-autorefresh instead of meta http-equiv which wipes session state
 try:
     from streamlit_autorefresh import st_autorefresh
     st_autorefresh(interval=30_000, key="dashboard_refresh")
 except ImportError:
-    # Fallback: show manual refresh button — do NOT use meta refresh (logs you out)
-    if st.button("🔄 Refresh", key="manual_refresh"):
+    # Fallback: show manual refresh button -- do NOT use meta refresh (logs you out)
+    if st.button("[refresh] Refresh", key="manual_refresh"):
         st.rerun()
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  DASHBOARD 2.0 — v7.36.3
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
+#  DASHBOARD 2.0 -- v7.36.3
+# -----------------------------------------------------------------------------
 #  Designed for non-technical readers: every metric has a plain-English
 #  explanation. Trading-jargon terms (Sharpe, profit factor, etc) live in
 #  expandable tooltips under each metric. Replaces all deprecated
 #  use_container_width=True with width="stretch" since use_container_width
 #  was removed by Streamlit after 2025-12-31.
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
 
 #  v7.36.4 (rev2): Dashboard version is now a self-contained constant
 #  rather than reading from ../src/version.py. The dashboard runs on
-#  Streamlit Cloud where there's no src/version.py — only dashboard_web.py
+#  Streamlit Cloud where there's no src/version.py -- only dashboard_web.py
 #  itself is deployed. Pre-fix, _resolve_version() always failed the file
 #  lookup on Streamlit and fell back to a stale hardcoded value.
 #  This constant must be updated alongside src/version.py at every release.
@@ -445,7 +445,7 @@ def _compute_performance_metrics(trades_df: pd.DataFrame) -> dict:
         "total_pnl": 0.0, "avg_win": 0.0, "avg_loss": 0.0,
         "profit_factor": 0.0, "payoff_ratio": 0.0, "expectancy": 0.0,
         "sharpe": 0.0, "max_drawdown": 0.0, "max_drawdown_pct": 0.0,
-        "current_streak": "—",
+        "current_streak": "--",
     }
     if trades_df is None or trades_df.empty or "pnl" not in trades_df.columns:
         return out
@@ -510,23 +510,23 @@ def _compute_performance_metrics(trades_df: pd.DataFrame) -> dict:
     return out
 
 
-# ── Header (dynamic version, mode badge, market state) ───────────────────────
+# -- Header (dynamic version, mode badge, market state) -----------------------
 _VERSION = _resolve_version()
-mode    = "🟡 PAPER" if is_paper else "🔴 LIVE"
+mode    = "[yellow] PAPER" if is_paper else "[red] LIVE"
 mstatus = _market_status()
 mcolor  = "green" if mstatus == "OPEN" else "orange" if "opens" in mstatus else "red"
 
 st.markdown(
-    f"# 📈 Trading Bot {_VERSION} &nbsp;&nbsp; {mode}"
+    f"# [chart-up] Trading Bot {_VERSION} &nbsp;&nbsp; {mode}"
 )
 st.caption(
     f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ET  "
-    f"·  Auto-refreshes every 30s  "
-    f"·  Market: :{mcolor}[{mstatus}]"
+    f"*  Auto-refreshes every 30s  "
+    f"*  Market: :{mcolor}[{mstatus}]"
 )
 
 
-# ── Bot health banner ────────────────────────────────────────────────────────
+# -- Bot health banner --------------------------------------------------------
 _health = _bot_health_check()
 if _health.get("available"):
     _hcols = st.columns([2, 1, 1, 1])
@@ -540,7 +540,7 @@ if _health.get("available"):
     with _hcols[0]:
         st.markdown(
             f"**Bot Status:** :{_status_color}[**{_status}**]  "
-            f"·  Last log: {_last_ts.strftime('%H:%M:%S') if _last_ts else 'n/a'}  "
+            f"*  Last log: {_last_ts.strftime('%H:%M:%S') if _last_ts else 'n/a'}  "
             f"({_age:.0f} min ago)"
         )
     _hcols[1].metric("Errors (1h)", _health.get("errors_last_hour", 0))
@@ -548,22 +548,22 @@ if _health.get("available"):
     _hcols[3].metric("Scans (1h)", _health.get("scans_last_hour", 0))
     if _status == "STALE":
         st.error(
-            f"⚠️ Bot log hasn't been updated in {_age:.0f} minutes. "
-            f"The bot may have crashed or hung — check the terminal."
+            f"! Bot log hasn't been updated in {_age:.0f} minutes. "
+            f"The bot may have crashed or hung -- check the terminal."
         )
     elif _status == "ERRORS":
         st.warning(
-            f"⚠️ {_health['errors_last_hour']} errors in the last hour — "
+            f"! {_health['errors_last_hour']} errors in the last hour -- "
             f"check trading_bot.log for details."
         )
 else:
     st.caption(
-        "💡 Bot health panel unavailable (dashboard running remotely from bot). "
+        "[idea] Bot health panel unavailable (dashboard running remotely from bot). "
         "Run dashboard locally for log-based health checks."
     )
 
 
-# ── Account summary (top-line numbers) ───────────────────────────────────────
+# -- Account summary (top-line numbers) ---------------------------------------
 daily_pl = 0.0
 equity = 0.0
 try:
@@ -607,7 +607,7 @@ try:
               f"{daily_pl_pct:+.2f}%",
               help="Profit or loss since yesterday's close. Green = up, red = down.")
     c5.metric("Goal Progress",
-              f"{min(daily_pl / DAILY_GOAL * 100, 100):.0f}%" if DAILY_GOAL > 0 else "—",
+              f"{min(daily_pl / DAILY_GOAL * 100, 100):.0f}%" if DAILY_GOAL > 0 else "--",
               f"target ${DAILY_GOAL:,.0f}/day",
               delta_color="off",
               help="How close today's P&L is to today's profit goal. The goal "
@@ -621,18 +621,18 @@ try:
         _dl_pct = abs(daily_pl) / equity * 100
         if _dl_pct >= 8.0:
             st.error(
-                f"🚨 **HARD-STOP THRESHOLD REACHED** — daily drawdown "
-                f"-{_dl_pct:.2f}% (≥ 8%). Bot's risk-scaler should have "
+                f"[alert] **HARD-STOP THRESHOLD REACHED** -- daily drawdown "
+                f"-{_dl_pct:.2f}% (>= 8%). Bot's risk-scaler should have "
                 f"halted entries. Verify in log."
             )
         elif _dl_pct >= 6.0:
             st.warning(
-                f"⚠️ **Risk-scaler soft-limit zone** — daily drawdown "
-                f"-{_dl_pct:.2f}% (≥ 6%). Entry sizes reduced to 50%."
+                f"! **Risk-scaler soft-limit zone** -- daily drawdown "
+                f"-{_dl_pct:.2f}% (>= 6%). Entry sizes reduced to 50%."
             )
         elif _dl_pct >= 3.0:
             st.info(
-                f"📉 Drawdown caution: daily P&L -{_dl_pct:.2f}% "
+                f"[chart-down] Drawdown caution: daily P&L -{_dl_pct:.2f}% "
                 f"(approaching 6% soft-limit)."
             )
 except Exception as e:
@@ -642,11 +642,11 @@ except Exception as e:
 st.divider()
 
 
-# ── Performance metrics (NEW — Dashboard 2.0 headline panel) ─────────────────
-st.subheader("📊 Performance Metrics")
+# -- Performance metrics (NEW -- Dashboard 2.0 headline panel) -----------------
+st.subheader("[chart] Performance Metrics")
 st.caption(
     "How well the bot is trading, computed across the last 7 days of "
-    "completed trades. Hover ❓ on any metric for what it means."
+    "completed trades. Hover ? on any metric for what it means."
 )
 
 try:
@@ -655,11 +655,11 @@ try:
 
     if metrics["total_trades"] == 0:
         st.info(
-            "💡 No completed trades yet in the last 7 days. Metrics will populate "
-            "as the bot trades. Open positions don't count — only closed trades."
+            "[idea] No completed trades yet in the last 7 days. Metrics will populate "
+            "as the bot trades. Open positions don't count -- only closed trades."
         )
     else:
-        # Row 1 — primary "is the bot working?" metrics
+        # Row 1 -- primary "is the bot working?" metrics
         m1, m2, m3, m4, m5 = st.columns(5)
         m1.metric(
             "Total Trades",
@@ -678,7 +678,7 @@ try:
             f"{'above' if wr >= 50 else 'below'} 50%",
             delta_color=wr_delta_color,
             help="Percentage of trades that were profitable. Above 50% means "
-                 "more wins than losses — but doesn't tell the whole story; "
+                 "more wins than losses -- but doesn't tell the whole story; "
                  "see Profit Factor."
         )
         m3.metric(
@@ -698,26 +698,26 @@ try:
             "Streak",
             metrics["current_streak"],
             help="Current consecutive wins (W) or losses (L). Long losing "
-                 "streaks may be normal — what matters is the average."
+                 "streaks may be normal -- what matters is the average."
         )
 
-        # Row 2 — risk-adjusted / quality metrics
+        # Row 2 -- risk-adjusted / quality metrics
         st.markdown("##### Risk-Adjusted Quality")
         q1, q2, q3, q4, q5 = st.columns(5)
 
         # Profit Factor: handle inf
         pf = metrics["profit_factor"]
-        pf_str = f"{pf:.2f}" if pf != float("inf") else "∞"
+        pf_str = f"{pf:.2f}" if pf != float("inf") else "inf"
         pf_label = (
-            "🟢 Excellent" if pf >= 2.0
-            else "🟢 Good" if pf >= 1.5
-            else "🟡 Marginal" if pf >= 1.0
-            else "🔴 Losing"
+            "[green] Excellent" if pf >= 2.0
+            else "[green] Good" if pf >= 1.5
+            else "[yellow] Marginal" if pf >= 1.0
+            else "[red] Losing"
         )
         q1.metric(
             "Profit Factor", pf_str, pf_label,
             delta_color="off",
-            help="Total $ won ÷ total $ lost. Above 1.0 = profitable; "
+            help="Total $ won / total $ lost. Above 1.0 = profitable; "
                  "above 1.5 = good; above 2.0 = excellent. This handles "
                  "uneven win/loss sizes that win rate misses."
         )
@@ -725,10 +725,10 @@ try:
         # Sharpe per-trade
         sharpe = metrics["sharpe"]
         sharpe_label = (
-            "🟢 Excellent" if sharpe >= 0.5
-            else "🟢 Good" if sharpe >= 0.25
-            else "🟡 Marginal" if sharpe >= 0.0
-            else "🔴 Negative"
+            "[green] Excellent" if sharpe >= 0.5
+            else "[green] Good" if sharpe >= 0.25
+            else "[yellow] Marginal" if sharpe >= 0.0
+            else "[red] Negative"
         )
         q2.metric(
             "Sharpe (per-trade)",
@@ -744,16 +744,16 @@ try:
         # Payoff ratio
         po = metrics["payoff_ratio"]
         po_label = (
-            "🟢 Good" if po >= 1.5
-            else "🟡 OK" if po >= 1.0
-            else "🔴 Risky"
+            "[green] Good" if po >= 1.5
+            else "[yellow] OK" if po >= 1.0
+            else "[red] Risky"
         )
         q3.metric(
             "Payoff Ratio",
             f"{po:.2f}x",
             po_label,
             delta_color="off",
-            help="Average win size ÷ average loss size. 1.5x means winners "
+            help="Average win size / average loss size. 1.5x means winners "
                  "are 50% bigger than losers. With low win rates you need "
                  "high payoff ratio; with high win rates you can survive lower."
         )
@@ -804,8 +804,8 @@ except Exception as e:
 st.divider()
 
 
-# ── Equity curve chart (NEW) ─────────────────────────────────────────────────
-st.subheader("📈 Equity Curve — last 7 days")
+# -- Equity curve chart (NEW) -------------------------------------------------
+st.subheader("[chart-up] Equity Curve -- last 7 days")
 st.caption(
     "Cumulative profit & loss over time across all closed trades. "
     "An upward-sloping line means the bot is making money over time."
@@ -846,8 +846,8 @@ except Exception as e:
 st.divider()
 
 
-# ── Strategy breakdown (NEW) ─────────────────────────────────────────────────
-st.subheader("🎯 Strategy Breakdown")
+# -- Strategy breakdown (NEW) -------------------------------------------------
+st.subheader("[target] Strategy Breakdown")
 st.caption(
     "Where the bot's recent profits & losses came from. Helps spot which "
     "strategies are working and which are dragging."
@@ -909,7 +909,7 @@ except Exception as e:
 st.divider()
 
 
-# ── Open positions ────────────────────────────────────────────────────────────
+# -- Open positions ------------------------------------------------------------
 left, right = st.columns([3, 1])
 
 with left:
@@ -917,7 +917,7 @@ with left:
     try:
         positions = client.get_all_positions()
         if not positions:
-            st.info("📭 No open positions right now. The bot will open new "
+            st.info("[empty] No open positions right now. The bot will open new "
                     "ones when it finds high-probability setups.")
         else:
             rows = []
@@ -940,7 +940,7 @@ with left:
                 qty_str = f"{raw_qty:.4f}" if _is_crypto else str(int(raw_qty))
                 rows.append({
                     "Symbol": p.symbol,
-                    "Type": "🪙 Crypto" if _is_crypto else ("📊 Option" if _is_option else "📈 Stock"),
+                    "Type": "[coin] Crypto" if _is_crypto else ("[chart] Option" if _is_option else "[chart-up] Stock"),
                     "Qty": qty_str,
                     "Entry": f"${entry:.2f}",
                     "Current": f"${current:.2f}",
@@ -973,15 +973,15 @@ with right:
 
     # Market state
     if mstatus == "OPEN":
-        st.success(f"📈 Market: **OPEN**")
+        st.success(f"[chart-up] Market: **OPEN**")
     else:
-        st.warning(f"⏰ Market: {mstatus}")
+        st.warning(f"! Market: {mstatus}")
 
     # Circuit breaker (heuristic from health log)
     if _health.get("status") in ("ERRORS", "STALE"):
-        st.error("Circuit breaker:\n\n🔴 **CHECK BOT**")
+        st.error("Circuit breaker:\n\n[red] **CHECK BOT**")
     else:
-        st.success("Circuit breaker:\n\n🟢 **OK**")
+        st.success("Circuit breaker:\n\n[green] **OK**")
 
     # Daily-goal remaining
     try:
@@ -1013,15 +1013,15 @@ with right:
     _regime = _read_btc_regime()
     if _regime != "unknown":
         _regime_display = _regime.split(" | ", 1)[0].strip() if " | " in _regime else _regime
-        _regime_emoji = {"RANGING": "↔️", "TRENDING": "📈", "NEUTRAL": "⚖️"}.get(
-            _regime_display.upper(), "❓")
+        _regime_emoji = {"RANGING": "<->", "TRENDING": "[chart-up]", "NEUTRAL": ""}.get(
+            _regime_display.upper(), "?")
         st.markdown(f"**BTC regime:** {_regime_emoji} `{_regime_display}`")
 
 st.divider()
 
 
-# ── Recent session trades ─────────────────────────────────────────────────────
-st.subheader("📋 Recent Trades")
+# -- Recent session trades -----------------------------------------------------
+st.subheader("[clipboard] Recent Trades")
 st.caption("Last 30 trade entries from the last 7 days, newest first.")
 
 try:
@@ -1049,14 +1049,14 @@ try:
         else:
             st.dataframe(df_recent_trades.head(30), width="stretch", hide_index=True)
     else:
-        st.info("No trades yet — bot will start populating this once it trades.")
+        st.info("No trades yet -- bot will start populating this once it trades.")
 except Exception as e:
     st.caption(f"Recent trades error: {e}")
 
 st.divider()
 
 
-# ── Footer ───────────────────────────────────────────────────────────────────
+# -- Footer -------------------------------------------------------------------
 st.caption(
     f"Trading Bot {_VERSION}  |  "
     f"{'Paper trading' if is_paper else 'LIVE TRADING'}  |  "
